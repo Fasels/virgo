@@ -1,0 +1,14 @@
+config.toml
+.env
+.venv/
+.idea/
+.agents/
+.codex/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+htmlcov/
+.coverage
+dist/
+build/

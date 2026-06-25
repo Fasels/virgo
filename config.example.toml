@@ -1,0 +1,3 @@
+private_registration_token = "replace-with-a-long-random-registration-secret"
+business_api_token = "replace-with-a-long-random-business-secret"
+device_online_window_seconds = 300
