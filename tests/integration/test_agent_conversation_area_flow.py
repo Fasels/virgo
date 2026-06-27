@@ -169,3 +169,137 @@ def test_inbound_message_publishes_only_to_matching_agent_area(clean_database):
     assert f'"messageId":"{response.json()["id"]}"' in north_event
     assert '"areas":"north"' in north_event
     assert south_event.startswith(": ping ")
+
+
+def test_inbound_contact_copies_area_from_receiving_sim(clean_database):
+    marker = clean_database.track_push_token("pytest-contact-area-" + uuid4().hex)
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    inbox_id = clean_database.track_message_key("contact-area:" + uuid4().hex)
+    app = create_app(
+        Settings(clean_database.dsn, "registration-secret", "business-secret")
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        registration = client.post(
+            "/mobile/v1/device",
+            headers={"Authorization": "Bearer registration-secret"},
+            json={
+                "name": "contact-area-phone",
+                "pushToken": marker,
+                "simCards": [{"slotIndex": 0, "simNumber": 1}],
+            },
+        ).json()
+        clean_database.track(registration["id"])
+        with psycopg.connect(clean_database.dsn) as connection:
+            connection.execute(
+                "UPDATE sim_cards SET areas = %s WHERE device_id = %s AND sim_number = 1",
+                ("east", registration["id"]),
+            )
+            connection.commit()
+
+        response = client.post(
+            "/mobile/v1/inbox",
+            headers={"Authorization": f"Bearer {registration['token']}"},
+            json={
+                "id": inbox_id,
+                "type": "SMS",
+                "sender": sender,
+                "recipient": None,
+                "simNumber": 1,
+                "subscriptionId": 3,
+                "receivedAt": datetime.now(timezone.utc).isoformat(),
+                "textMessage": {"text": "contact area"},
+                "dataMessage": None,
+            },
+        )
+
+    assert response.status_code == 201
+    with psycopg.connect(clean_database.dsn) as connection:
+        area = connection.execute(
+            "SELECT areas FROM contacts WHERE normalized_phone_number = %s",
+            (sender,),
+        ).fetchone()[0]
+    assert area == "east"
+
+
+def test_inbound_contact_area_updates_to_latest_receiving_sim(clean_database):
+    first_marker = clean_database.track_push_token("pytest-contact-first-" + uuid4().hex)
+    second_marker = clean_database.track_push_token("pytest-contact-second-" + uuid4().hex)
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    first_inbox_id = clean_database.track_message_key("contact-first:" + uuid4().hex)
+    second_inbox_id = clean_database.track_message_key("contact-second:" + uuid4().hex)
+    app = create_app(
+        Settings(clean_database.dsn, "registration-secret", "business-secret")
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        first_registration = client.post(
+            "/mobile/v1/device",
+            headers={"Authorization": "Bearer registration-secret"},
+            json={
+                "name": "contact-first-phone",
+                "pushToken": first_marker,
+                "simCards": [{"slotIndex": 0, "simNumber": 1}],
+            },
+        ).json()
+        second_registration = client.post(
+            "/mobile/v1/device",
+            headers={"Authorization": "Bearer registration-secret"},
+            json={
+                "name": "contact-second-phone",
+                "pushToken": second_marker,
+                "simCards": [{"slotIndex": 0, "simNumber": 1}],
+            },
+        ).json()
+        clean_database.track(first_registration["id"])
+        clean_database.track(second_registration["id"])
+        with psycopg.connect(clean_database.dsn) as connection:
+            connection.execute(
+                "UPDATE sim_cards SET areas = %s WHERE device_id = %s AND sim_number = 1",
+                ("east", first_registration["id"]),
+            )
+            connection.execute(
+                "UPDATE sim_cards SET areas = %s WHERE device_id = %s AND sim_number = 1",
+                ("west", second_registration["id"]),
+            )
+            connection.commit()
+
+        first_response = client.post(
+            "/mobile/v1/inbox",
+            headers={"Authorization": f"Bearer {first_registration['token']}"},
+            json={
+                "id": first_inbox_id,
+                "type": "SMS",
+                "sender": sender,
+                "recipient": None,
+                "simNumber": 1,
+                "subscriptionId": 3,
+                "receivedAt": datetime.now(timezone.utc).isoformat(),
+                "textMessage": {"text": "first area"},
+                "dataMessage": None,
+            },
+        )
+        second_response = client.post(
+            "/mobile/v1/inbox",
+            headers={"Authorization": f"Bearer {second_registration['token']}"},
+            json={
+                "id": second_inbox_id,
+                "type": "SMS",
+                "sender": sender,
+                "recipient": None,
+                "simNumber": 1,
+                "subscriptionId": 3,
+                "receivedAt": datetime.now(timezone.utc).isoformat(),
+                "textMessage": {"text": "second area"},
+                "dataMessage": None,
+            },
+        )
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+    with psycopg.connect(clean_database.dsn) as connection:
+        area = connection.execute(
+            "SELECT areas FROM contacts WHERE normalized_phone_number = %s",
+            (sender,),
+        ).fetchone()[0]
+    assert area == "west"

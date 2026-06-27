@@ -65,10 +65,10 @@ class InboundMessageService:
             connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(f"conversation:{device_id}:{request.sender}:{sim_id or 'none'}",))
             contact_id=f"contact_{secrets.token_hex(16)}"
             contact_id=connection.execute(
-                """INSERT INTO contacts(id,phone_number,normalized_phone_number,source,last_contact_at,created_at,updated_at)
-                VALUES(%s,%s,%s,'INBOUND_AUTO',%s,%s,%s)
-                ON CONFLICT(normalized_phone_number) DO UPDATE SET phone_number=EXCLUDED.phone_number,last_contact_at=EXCLUDED.last_contact_at,updated_at=EXCLUDED.updated_at
-                RETURNING id""",(contact_id,request.sender,request.sender,received,now,now)).fetchone()[0]
+                """INSERT INTO contacts(id,phone_number,normalized_phone_number,source,last_contact_at,created_at,updated_at,areas)
+                VALUES(%s,%s,%s,'INBOUND_AUTO',%s,%s,%s,%s)
+                ON CONFLICT(normalized_phone_number) DO UPDATE SET phone_number=EXCLUDED.phone_number,last_contact_at=EXCLUDED.last_contact_at,updated_at=EXCLUDED.updated_at,areas=EXCLUDED.areas
+                RETURNING id""",(contact_id,request.sender,request.sender,received,now,now,area)).fetchone()[0]
             conversation=connection.execute(
                 """SELECT id FROM conversations WHERE external_phone_number=%s AND device_id=%s
                 AND sim_card_id IS NOT DISTINCT FROM %s::varchar AND status='OPEN' FOR UPDATE""",

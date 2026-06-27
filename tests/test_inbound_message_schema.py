@@ -21,6 +21,13 @@ def test_sms_normalizes_sender_and_preserves_masked_recipient():
     assert request.text_message.text == "hello"
 
 
+def test_sms_allows_omitted_data_message():
+    body = sms()
+    body.pop("dataMessage")
+    request = InboundMessageRequest.model_validate(body)
+    assert request.data_message is None
+
+
 def test_data_sms_requires_strict_base64():
     request = InboundMessageRequest.model_validate(sms(
         type="DATA_SMS", textMessage=None, dataMessage={"data": "AQJ/"}

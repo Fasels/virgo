@@ -40,7 +40,7 @@ class InboundMessageRequest(BaseModel):
     subscription_id: int | None = Field(default=None, alias="subscriptionId", strict=True)
     received_at: AwareDatetime = Field(alias="receivedAt")
     text_message: InboundTextMessage | None = Field(alias="textMessage")
-    data_message: InboundDataMessage | None = Field(alias="dataMessage")
+    data_message: InboundDataMessage | None = Field(default=None, alias="dataMessage")
 
     @field_validator("sender")
     @classmethod

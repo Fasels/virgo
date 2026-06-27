@@ -5,6 +5,10 @@ from app.api.agent_conversation import (
     AgentConversationQueryService,
     create_agent_conversation_router,
 )
+from app.api.agent_contact import (
+    AgentContactQueryService,
+    create_agent_contact_router,
+)
 from app.api.agent_events import AgentEventsRegistry, create_agent_events_router
 from app.api.events import create_events_router
 from app.api.device import (
@@ -23,6 +27,7 @@ from app.services.device_auth_service import DeviceAuthService
 from app.services.device_service import DeviceService
 from app.services.agent_auth_service import AgentAuthService
 from app.services.agent_conversation_service import AgentConversationService
+from app.services.agent_contact_service import AgentContactService
 from app.services.agent_event_publisher import (
     AgentEventRegistry,
     RegistryAgentEventPublisher,
@@ -53,6 +58,7 @@ def create_app(
     inbound_publisher: InboundMessagePublisher | None = None,
     agent_auth_service: AgentAuthenticationService | None = None,
     agent_conversation_service: AgentConversationQueryService | None = None,
+    agent_contact_service: AgentContactQueryService | None = None,
     agent_event_registry: AgentEventsRegistry | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Virgo SMS Gateway")
@@ -96,6 +102,7 @@ def create_app(
         database,
         business_message_service,
     )
+    agent_contacts = agent_contact_service or AgentContactService(database)
     app.include_router(
         create_device_router(
             settings.private_registration_token,
@@ -117,6 +124,7 @@ def create_app(
     app.include_router(
         create_agent_conversation_router(agent_auth, agent_conversations)
     )
+    app.include_router(create_agent_contact_router(agent_auth, agent_contacts))
     app.include_router(create_agent_events_router(agent_auth, agent_registry))
     mount_admin_ui(app, database)
     return app
