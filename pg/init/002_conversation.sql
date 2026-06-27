@@ -38,6 +38,7 @@ CREATE TABLE conversations (
     sim_card_id             VARCHAR(64)
                             REFERENCES sim_cards(id) ON DELETE SET NULL,
     sim_number              INTEGER,
+    areas                   VARCHAR(100),
     status                  VARCHAR(20) NOT NULL DEFAULT 'OPEN',
     unread_count            INTEGER NOT NULL DEFAULT 0,
     last_message_preview    VARCHAR(255),
@@ -65,6 +66,7 @@ CREATE INDEX idx_conversations_last_message ON conversations(last_message_at DES
 CREATE INDEX idx_conversations_external_phone ON conversations(external_phone_number);
 CREATE INDEX idx_conversations_contact ON conversations(contact_id);
 CREATE INDEX idx_conversations_device ON conversations(device_id);
+CREATE INDEX idx_conversations_areas ON conversations(areas);
 
 CREATE TABLE messages (
     id                   VARCHAR(64) PRIMARY KEY,

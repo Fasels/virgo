@@ -48,6 +48,7 @@ class Route:
     sim_card_id: str
     sim_number: int
     phone_number: str | None
+    areas: str | None = None
     conversation_id: str | None = None
     contact_id: str | None = None
 
@@ -243,7 +244,8 @@ class MessageCommandService:
                 """
                 SELECT c.external_phone_number, c.device_id, c.sim_card_id,
                        c.sim_number, c.status, c.contact_id, s.phone_number,
-                       d.enabled, d.status, d.last_seen_at, s.enabled, s.status
+                       d.enabled, d.status, d.last_seen_at, s.enabled, s.status,
+                       c.areas
                 FROM conversations c
                 JOIN devices d ON d.id = c.device_id
                 JOIN sim_cards s ON s.id = c.sim_card_id
@@ -274,13 +276,14 @@ class MessageCommandService:
                 sim_card_id=row[2],
                 sim_number=row[3],
                 phone_number=row[6],
+                areas=row[12],
                 conversation_id=request.conversation_id,
                 contact_id=row[5],
             )
 
         row = connection.execute(
             """
-            SELECT d.id, s.id, s.sim_number, s.phone_number
+            SELECT d.id, s.id, s.sim_number, s.phone_number, s.areas
             FROM devices d
             JOIN sim_cards s ON s.device_id = d.id
             WHERE d.enabled = TRUE
@@ -355,8 +358,8 @@ class MessageCommandService:
             """
             INSERT INTO conversations (
                 id, external_phone_number, contact_id, device_id,
-                sim_card_id, sim_number, status, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, 'OPEN', %s, %s)
+                sim_card_id, sim_number, areas, status, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'OPEN', %s, %s)
             """,
             (
                 conversation_id,
@@ -365,6 +368,7 @@ class MessageCommandService:
                 route.device_id,
                 route.sim_card_id,
                 route.sim_number,
+                route.areas,
                 now,
                 now,
             ),

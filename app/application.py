@@ -1,5 +1,11 @@
 from fastapi import FastAPI
 
+from app.api.agent_auth import AgentAuthenticationService, create_agent_auth_router
+from app.api.agent_conversation import (
+    AgentConversationQueryService,
+    create_agent_conversation_router,
+)
+from app.api.agent_events import AgentEventsRegistry, create_agent_events_router
 from app.api.events import create_events_router
 from app.api.device import (
     DeviceAuthenticationService,
@@ -15,6 +21,12 @@ from app.database import Database
 from app.errors import install_error_handling
 from app.services.device_auth_service import DeviceAuthService
 from app.services.device_service import DeviceService
+from app.services.agent_auth_service import AgentAuthService
+from app.services.agent_conversation_service import AgentConversationService
+from app.services.agent_event_publisher import (
+    AgentEventRegistry,
+    RegistryAgentEventPublisher,
+)
 from app.services.message_publisher import (
     MessageEnqueuedPublisher,
     RegistryMessageEnqueuedPublisher,
@@ -39,6 +51,9 @@ def create_app(
     message_state_service: MessageStateUpdatingService | None = None,
     inbound_message_service: InboundCreatingService | None = None,
     inbound_publisher: InboundMessagePublisher | None = None,
+    agent_auth_service: AgentAuthenticationService | None = None,
+    agent_conversation_service: AgentConversationQueryService | None = None,
+    agent_event_registry: AgentEventsRegistry | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Virgo SMS Gateway")
     install_error_handling(app)
@@ -63,6 +78,7 @@ def create_app(
         if message_publisher is not None
         else RegistryMessageEnqueuedPublisher(registry)
     )
+    agent_registry = agent_event_registry or AgentEventRegistry()
     business_message_service = message_service or MessageCommandService(
         database,
         online_window_seconds=settings.device_online_window_seconds,
@@ -71,7 +87,14 @@ def create_app(
     pull_service = message_pull_service or MessagePullService(database)
     state_service = message_state_service or MessageStateService(database)
     inbound_service = inbound_message_service or InboundMessageService(
-        database, inbound_publisher or NoOpInboundMessagePublisher()
+        database,
+        inbound_publisher or NoOpInboundMessagePublisher(),
+        RegistryAgentEventPublisher(agent_registry),
+    )
+    agent_auth = agent_auth_service or AgentAuthService(database)
+    agent_conversations = agent_conversation_service or AgentConversationService(
+        database,
+        business_message_service,
     )
     app.include_router(
         create_device_router(
@@ -90,5 +113,10 @@ def create_app(
     app.include_router(create_message_pull_router(auth_service, pull_service))
     app.include_router(create_message_status_router(auth_service, state_service))
     app.include_router(create_inbox_router(auth_service, inbound_service))
+    app.include_router(create_agent_auth_router(agent_auth))
+    app.include_router(
+        create_agent_conversation_router(agent_auth, agent_conversations)
+    )
+    app.include_router(create_agent_events_router(agent_auth, agent_registry))
     mount_admin_ui(app, database)
     return app

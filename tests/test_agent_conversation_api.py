@@ -1,0 +1,294 @@
+from uuid import uuid4
+
+import psycopg
+from fastapi.testclient import TestClient
+
+from app.application import create_app
+from app.config import Settings
+from app.security import hash_password
+
+
+def insert_account(connection, account_id, username, password_hash, area):
+    connection.execute(
+        """
+        INSERT INTO accounts(id, username, password_hash, areas, status)
+        VALUES(%s, %s, %s, %s, 'ACTIVE')
+        """,
+        (account_id, username, password_hash, area),
+    )
+
+
+def _insert_conversation_fixture(connection, clean_database, area: str):
+    suffix = uuid4().hex
+    now = 1_800_000_000_000
+    device_id = clean_database.track(f"dev_agent_{suffix}")
+    sim_id = f"sim_agent_{suffix}"
+    phone = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    contact_id = f"contact_agent_{suffix}"
+    conversation_id = f"conv_agent_{suffix}"
+    message_id = clean_database.track_message_key(f"msg-agent-{suffix}")
+    connection.execute(
+        """
+        INSERT INTO devices(id, name, token_hash, login, enabled, status, last_seen_at)
+        VALUES(%s, %s, %s, %s, TRUE, 'online', %s)
+        """,
+        (device_id, "agent phone", f"token_{suffix}", f"login_{suffix}", now),
+    )
+    connection.execute(
+        """
+        INSERT INTO sim_cards(id, device_id, slot_index, sim_number, areas)
+        VALUES(%s, %s, 0, 1, %s)
+        """,
+        (sim_id, device_id, area),
+    )
+    connection.execute(
+        """
+        INSERT INTO contacts(id, phone_number, normalized_phone_number, source)
+        VALUES(%s, %s, %s, 'MANUAL')
+        """,
+        (contact_id, phone, phone),
+    )
+    connection.execute(
+        """
+        INSERT INTO conversations(
+            id, external_phone_number, contact_id, device_id, sim_card_id,
+            sim_number, areas, status, unread_count, last_message_preview,
+            last_message_direction, last_message_at, created_at, updated_at
+        )
+        VALUES(%s, %s, %s, %s, %s, 1, %s, 'OPEN', 3, %s, 'INBOUND', %s, %s, %s)
+        """,
+        (
+            conversation_id,
+            phone,
+            contact_id,
+            device_id,
+            sim_id,
+            area,
+            f"{area} hello",
+            now,
+            now,
+            now,
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO messages(
+            id, conversation_id, direction, message_type, text_content,
+            from_phone_number, to_phone_number, state, device_id, sim_card_id,
+            sim_number, idempotency_key, received_at, created_at, updated_at
+        )
+        VALUES(%s, %s, 'INBOUND', 'SMS', %s, %s, NULL, 'Received', %s, %s, 1, %s, %s, %s, %s)
+        """,
+        (
+            message_id,
+            conversation_id,
+            f"{area} message",
+            phone,
+            device_id,
+            sim_id,
+            message_id,
+            now,
+            now,
+            now,
+        ),
+    )
+    return conversation_id, message_id
+
+
+def _login(client: TestClient, username: str, password: str) -> str:
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": username, "password": password},
+    )
+    assert response.status_code == 200
+    return response.json()["token"]
+
+
+def test_agent_conversation_list_returns_only_matching_area(clean_database):
+    north_user = "north_" + uuid4().hex
+    south_user = "south_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            north_user,
+            hash_password(password),
+            "north",
+        )
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            south_user,
+            hash_password(password),
+            "south",
+        )
+        north_conversation, _ = _insert_conversation_fixture(
+            connection, clean_database, "north"
+        )
+        south_conversation, _ = _insert_conversation_fixture(
+            connection, clean_database, "south"
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, north_user, password)
+        response = client.get(
+            "/api/v1/conversations",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    ids = [item["id"] for item in response.json()]
+    assert ids == [north_conversation]
+    assert south_conversation not in ids
+
+
+def test_agent_message_history_rejects_cross_area_access(clean_database):
+    username = "north_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        south_conversation, _ = _insert_conversation_fixture(
+            connection, clean_database, "south"
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.get(
+            f"/api/v1/conversations/{south_conversation}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 403
+
+
+def test_agent_can_mark_matching_conversation_read(clean_database):
+    username = "north_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        conversation_id, _ = _insert_conversation_fixture(
+            connection, clean_database, "north"
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.patch(
+            f"/api/v1/conversations/{conversation_id}/read",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    with psycopg.connect(clean_database.dsn) as connection:
+        unread_count = connection.execute(
+            "SELECT unread_count FROM conversations WHERE id = %s",
+            (conversation_id,),
+        ).fetchone()[0]
+    assert unread_count == 0
+
+
+def test_agent_can_reply_to_matching_conversation_route(clean_database):
+    username = "north_" + uuid4().hex
+    password = "correct-password"
+    key = clean_database.track_message_key("agent-reply:" + uuid4().hex)
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        conversation_id, _ = _insert_conversation_fixture(
+            connection, clean_database, "north"
+        )
+        route = connection.execute(
+            """
+            SELECT external_phone_number, device_id, sim_card_id, sim_number
+            FROM conversations
+            WHERE id = %s
+            """,
+            (conversation_id,),
+        ).fetchone()
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Idempotency-Key": key,
+            },
+            json={"text": "客服回复"},
+        )
+
+    assert response.status_code == 201
+    with psycopg.connect(clean_database.dsn) as connection:
+        message = connection.execute(
+            """
+            SELECT direction, conversation_id, to_phone_number, device_id,
+                   sim_card_id, sim_number, state
+            FROM messages
+            WHERE id = %s
+            """,
+            (response.json()["id"],),
+        ).fetchone()
+    assert message == (
+        "OUTBOUND",
+        conversation_id,
+        route[0],
+        route[1],
+        route[2],
+        route[3],
+        "Pending",
+    )
+
+
+def test_agent_reply_requires_idempotency_key(clean_database):
+    username = "north_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        conversation_id, _ = _insert_conversation_fixture(
+            connection, clean_database, "north"
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"text": "客服回复"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"

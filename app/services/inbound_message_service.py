@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 from app.database import Database
 from app.schemas.inbound_message import InboundMessageRequest, inbound_digest, received_millis
 from app.schemas.message import normalize_phone
+from app.services.agent_event_publisher import NoOpAgentEventPublisher
 from app.services.inbound_publisher import InboundMessagePublisher
 
 
@@ -24,11 +25,17 @@ class InboundResult:
     id: str
     conversation_id: str
     created: bool
+    areas: str | None = None
 
 
 class InboundMessageService:
-    def __init__(self, database: Database, publisher: InboundMessagePublisher):
-        self._database=database; self._publisher=publisher
+    def __init__(
+        self,
+        database: Database,
+        publisher: InboundMessagePublisher,
+        agent_publisher=NoOpAgentEventPublisher(),
+    ):
+        self._database=database; self._publisher=publisher; self._agent_publisher=agent_publisher
 
     def create(self, device_id: str, request: InboundMessageRequest) -> InboundResult:
         now=time.time_ns()//1_000_000; received=received_millis(request)
@@ -46,15 +53,15 @@ class InboundMessageService:
                 return InboundResult(existing[0],existing[1],False)
             sim=None
             if request.sim_number is not None:
-                sim=connection.execute("SELECT id,sim_number FROM sim_cards WHERE device_id=%s AND sim_number=%s LIMIT 1",(device_id,request.sim_number)).fetchone()
+                sim=connection.execute("SELECT id,sim_number,areas FROM sim_cards WHERE device_id=%s AND sim_number=%s LIMIT 1",(device_id,request.sim_number)).fetchone()
             if sim is None and request.recipient:
                 try: normalized_recipient=normalize_phone(request.recipient)
                 except ValueError: normalized_recipient=None
                 if normalized_recipient:
                     sim=connection.execute(
-                        "SELECT id,sim_number FROM sim_cards WHERE device_id=%s AND regexp_replace(phone_number,'[\\s()\\-]','','g')=%s LIMIT 1",
+                        "SELECT id,sim_number,areas FROM sim_cards WHERE device_id=%s AND regexp_replace(phone_number,'[\\s()\\-]','','g')=%s LIMIT 1",
                         (device_id,normalized_recipient),).fetchone()
-            sim_id=sim[0] if sim else None; sim_number=sim[1] if sim else request.sim_number
+            sim_id=sim[0] if sim else None; sim_number=sim[1] if sim else request.sim_number; area=sim[2] if sim else None
             connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(f"conversation:{device_id}:{request.sender}:{sim_id or 'none'}",))
             contact_id=f"contact_{secrets.token_hex(16)}"
             contact_id=connection.execute(
@@ -68,8 +75,8 @@ class InboundMessageService:
                 (request.sender,device_id,sim_id)).fetchone()
             conversation_id=conversation[0] if conversation else f"conv_{secrets.token_hex(16)}"
             if conversation is None:
-                connection.execute("""INSERT INTO conversations(id,external_phone_number,contact_id,device_id,sim_card_id,sim_number,status,created_at,updated_at)
-                VALUES(%s,%s,%s,%s,%s,%s,'OPEN',%s,%s)""",(conversation_id,request.sender,contact_id,device_id,sim_id,sim_number,now,now))
+                connection.execute("""INSERT INTO conversations(id,external_phone_number,contact_id,device_id,sim_card_id,sim_number,areas,status,created_at,updated_at)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,'OPEN',%s,%s)""",(conversation_id,request.sender,contact_id,device_id,sim_id,sim_number,area,now,now))
             message_id=f"msg_{secrets.token_hex(16)}"
             text=request.text_message.text if request.text_message else None
             data=request.data_message.data if request.data_message else None
@@ -82,7 +89,10 @@ class InboundMessageService:
             preview=text[:255] if text else "[Data SMS]"
             connection.execute("""UPDATE conversations SET unread_count=unread_count+1,last_message_preview=%s,last_message_direction='INBOUND',last_message_at=%s,updated_at=%s WHERE id=%s""",(preview,received,now,conversation_id))
             connection.execute("UPDATE devices SET status='online',last_seen_at=%s,updated_at=%s WHERE id=%s",(now,now,device_id))
-            result=InboundResult(message_id,conversation_id,True)
+            result=InboundResult(message_id,conversation_id,True,area)
         try: self._publisher.publish(device_id,result.id,result.conversation_id)
         except Exception: logger.exception("Inbound publisher failed for message %s",result.id)
+        if result.areas:
+            try: self._agent_publisher.publish_inbound_message(result.areas,result.id,result.conversation_id)
+            except Exception: logger.exception("Agent event publisher failed for message %s",result.id)
         return result

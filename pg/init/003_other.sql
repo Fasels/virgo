@@ -16,6 +16,17 @@ CREATE INDEX idx_accounts_areas ON accounts(areas);
 CREATE INDEX idx_accounts_use_sims ON accounts(use_sims_id);
 CREATE INDEX idx_accounts_status ON accounts(status);
 
+CREATE TABLE agent_sessions (
+    token_hash VARCHAR(255) PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL
+               REFERENCES accounts(id) ON DELETE CASCADE,
+    created_at BIGINT NOT NULL DEFAULT ((EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT),
+    expires_at BIGINT NOT NULL
+);
+
+CREATE INDEX idx_agent_sessions_account ON agent_sessions(account_id);
+CREATE INDEX idx_agent_sessions_expires ON agent_sessions(expires_at);
+
 -- 商品/客服提醒表。update_time 为 UTC Unix 毫秒。
 CREATE TABLE products (
     id          VARCHAR(64) PRIMARY KEY,
