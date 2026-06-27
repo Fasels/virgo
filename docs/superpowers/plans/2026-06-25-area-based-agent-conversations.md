@@ -4,7 +4,7 @@
 
 **Goal:** Build the customer-service API so agents can log in, see only conversations for their configured area, read message history, reply by SMS through the existing phone gateway, and receive new-message events.
 
-**Architecture:** Keep the existing SMS gateway as the delivery layer. Add an agent-facing API layer under `/api/v1` that authenticates against `accounts`, filters conversations by `accounts.areas = conversations.areas`, and reuses the existing outbound-message service for replies. Store the conversation area on `conversations.areas` when a conversation is created so list queries and permission checks stay simple.
+**Architecture:** Keep the existing SMS gateway as the delivery layer. Add an agent-facing API layer under `/agent/v1` that authenticates against `accounts`, filters conversations by `accounts.areas = conversations.areas`, and reuses the existing outbound-message service for replies. Store the conversation area on `conversations.areas` when a conversation is created so list queries and permission checks stay simple.
 
 **Tech Stack:** FastAPI, Pydantic, psycopg 3, PostgreSQL, Server-Sent Events, pytest, FastAPI TestClient.
 
@@ -239,7 +239,7 @@ def test_outbound_conversation_copies_area_from_selected_sim(clean_database):
             connection.commit()
 
         response = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers={
                 "Authorization": "Bearer business-secret",
                 "Idempotency-Key": key,
@@ -348,12 +348,12 @@ def test_agent_login_returns_token_and_me(clean_database):
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
     with TestClient(app, raise_server_exceptions=False) as client:
         login = client.post(
-            "/api/v1/auth/login",
+            "/agent/v1/auth/login",
             json={"username": username, "password": password},
         )
         assert login.status_code == 200
         token = login.json()["token"]
-        me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+        me = client.get("/agent/v1/me", headers={"Authorization": f"Bearer {token}"})
 
     assert me.status_code == 200
     assert me.json() == {"id": account_id, "username": username, "areas": "north"}
@@ -374,7 +374,7 @@ def test_agent_login_rejects_wrong_password(clean_database):
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
-            "/api/v1/auth/login",
+            "/agent/v1/auth/login",
             json={"username": username, "password": "wrong-password"},
         )
 
@@ -541,7 +541,7 @@ class AgentAuthService:
 
 - [ ] **Step 6: Create auth router**
 
-Create `app/api/agent_auth.py` with `POST /api/v1/auth/login` and `GET /api/v1/me`. Reuse `parse_json_model` from `app.api.device`. Return `401 UNAUTHORIZED` for invalid credentials or token.
+Create `app/api/agent_auth.py` with `POST /agent/v1/auth/login` and `GET /agent/v1/me`. Reuse `parse_json_model` from `app.api.device`. Return `401 UNAUTHORIZED` for invalid credentials or token.
 
 - [ ] **Step 7: Wire auth router**
 
@@ -583,9 +583,9 @@ def insert_account(connection, account_id, username, password_hash, area):
     )
 ```
 
-The first test logs in as the north agent and asserts `GET /api/v1/conversations` returns only the conversation whose `areas` is `"north"`.
+The first test logs in as the north agent and asserts `GET /agent/v1/conversations` returns only the conversation whose `areas` is `"north"`.
 
-The second test logs in as the north agent and asserts `GET /api/v1/conversations/{southConversationId}/messages` returns `403`.
+The second test logs in as the north agent and asserts `GET /agent/v1/conversations/{southConversationId}/messages` returns `403`.
 
 - [ ] **Step 2: Create conversation schemas**
 
@@ -656,16 +656,16 @@ If the conversation id exists without matching the agent area, raise `Conversati
 Create `app/api/agent_conversation.py` with:
 
 ```text
-GET /api/v1/conversations
-GET /api/v1/conversations/{conversation_id}/messages
-PATCH /api/v1/conversations/{conversation_id}/read
+GET /agent/v1/conversations
+GET /agent/v1/conversations/{conversation_id}/messages
+PATCH /agent/v1/conversations/{conversation_id}/read
 ```
 
 Use agent bearer auth from `AgentAuthService.authenticate`.
 
 - [ ] **Step 5: Implement read marking**
 
-`PATCH /api/v1/conversations/{conversation_id}/read` must:
+`PATCH /agent/v1/conversations/{conversation_id}/read` must:
 
 ```sql
 UPDATE conversations
@@ -706,7 +706,7 @@ Expected: list filtering, message access, and read marking pass.
 Add a test that logs in as an agent whose `areas` matches the conversation, calls:
 
 ```text
-POST /api/v1/conversations/{conversationId}/messages
+POST /agent/v1/conversations/{conversationId}/messages
 ```
 
 with:
@@ -820,7 +820,7 @@ Create `app/services/agent_event_publisher.py` with a registry keyed by agent ar
 Create `app/api/agent_events.py`:
 
 ```text
-GET /api/v1/agent/events
+GET /agent/v1/events
 ```
 
 Authenticate the agent, register the SSE connection under `agent.areas`, and stream events with media type `text/event-stream`.

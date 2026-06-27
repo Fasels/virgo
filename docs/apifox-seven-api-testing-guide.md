@@ -49,7 +49,7 @@ pm.environment.set("inbound_received_at_iso", new Date().toISOString());
 | --- | --- | --- |
 | 1 | `POST /mobile/v1/device` | 注册 Token |
 | 2 | `PATCH /mobile/v1/device` | 设备 Token |
-| 3 | `POST /api/v1/messages` | 业务 Token |
+| 3 | `POST /business/v1/messages` | 业务 Token |
 | 4 | `GET /mobile/v1/events` | 设备 Token |
 | 5 | `GET /mobile/v1/message?order=fifo` | 设备 Token |
 | 6 | `PATCH /mobile/v1/message` | 设备 Token |
@@ -148,7 +148,7 @@ curl.exe -N -H "Authorization: Bearer YOUR_DEVICE_TOKEN" -H "Accept: text/event-
 ### 4.4 接口 3：业务系统创建短信
 
 - 方法：`POST`
-- URL：`{{base_url}}/api/v1/messages`
+- URL：`{{base_url}}/business/v1/messages`
 - Headers：
   - `Authorization: Bearer {{business_token}}`
   - `Idempotency-Key: outbound-{{run_id}}`

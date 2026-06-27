@@ -2,7 +2,7 @@
 
 ## 目标
 
-实现第三个接口 `POST /api/v1/messages`。业务系统通过独立 API Token 创建一条出站 SMS，服务器完成请求幂等、设备与 SIM 路由、联系人和会话匹配，并在一个 PostgreSQL 事务中创建消息、接收人和初始状态历史。
+实现第三个接口 `POST /business/v1/messages`。业务系统通过独立 API Token 创建一条出站 SMS，服务器完成请求幂等、设备与 SIM 路由、联系人和会话匹配，并在一个 PostgreSQL 事务中创建消息、接收人和初始状态历史。
 
 第一版每次请求只允许一个接收号码，但仍写入 `message_recipients`，为后续多接收人扩展保留兼容结构。
 
@@ -17,7 +17,7 @@ business_api_token = "replace-with-a-long-random-secret"
 device_online_window_seconds = 300
 ```
 
-- `business_api_token` 必填、非空，供业务系统调用 `/api/v1/*`。
+- `business_api_token` 必填、非空，供业务系统调用 `/business/v1/*`。
 - `device_online_window_seconds` 必须是正整数，默认建议值为 300 秒。
 - 默认读取项目根目录 `config.toml`。
 - 可通过环境变量 `VIRGO_CONFIG_FILE` 指定其他 TOML 文件。
@@ -31,7 +31,7 @@ device_online_window_seconds = 300
 请求：
 
 ```http
-POST /api/v1/messages
+POST /business/v1/messages
 Authorization: Bearer <business_api_token>
 Idempotency-Key: order-123-sms-1
 Content-Type: application/json
@@ -75,7 +75,7 @@ Content-Type: application/json
 
 - Token 缺失、认证方案错误、空 Token 或值不匹配：`401 UNAUTHORIZED`。
 - 使用 `secrets.compare_digest` 做常量时间比较。
-- 私有注册 Token 和设备 Token 不能调用 `/api/v1/messages`。
+- 私有注册 Token 和设备 Token 不能调用 `/business/v1/messages`。
 - 业务 Token 不能调用 `/mobile/v1/*`。
 - 认证先于 JSON 正文解析，因此错误 Token 与错误正文同时出现时优先返回 `401`。
 - 日志和错误响应不得输出任何 Token。

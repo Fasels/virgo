@@ -32,7 +32,7 @@
 
 1. `POST /mobile/v1/device` 注册并提取设备 Token。
 2. `PATCH /mobile/v1/device` 上线设备和 SIM。
-3. `POST /api/v1/messages` 创建出站消息并提取消息/会话 ID。
+3. `POST /business/v1/messages` 创建出站消息并提取消息/会话 ID。
 4. `GET /mobile/v1/events` 建立 SSE；实际操作时在接口 3 前打开独立标签页。
 5. `GET /mobile/v1/message?order=fifo` 领取消息为 Processed。
 6. `PATCH /mobile/v1/message` 依次回传 Sent 和 Delivered。

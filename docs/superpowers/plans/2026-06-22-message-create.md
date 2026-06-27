@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement `POST /api/v1/messages` with TOML-backed business authentication, global request idempotency, online device/SIM routing, and atomic outbound message persistence.
+**Goal:** Implement `POST /business/v1/messages` with TOML-backed business authentication, global request idempotency, online device/SIM routing, and atomic outbound message persistence.
 
 **Architecture:** Add dedicated message DTO, publisher, command service, and API router modules. Keep routing and all contact/conversation/message writes inside one Psycopg transaction protected by an advisory lock. Reuse the existing FastAPI request/error infrastructure and PostgreSQL test cleanup discipline.
 
@@ -260,14 +260,14 @@ Use injected recording command service and test:
 ```python
 def test_create_message_returns_201_then_200_for_replay():
     first = client.post(
-        "/api/v1/messages",
+        "/business/v1/messages",
         headers={"Authorization": "Bearer business-secret", "Idempotency-Key": "order-1"},
         json={"phoneNumbers": ["+8613900000000"], "text": "hello"},
     )
     assert first.status_code == 201
     service.result = MessageCreateResult(service.result.response, replayed=True)
     replay = client.post(
-        "/api/v1/messages",
+        "/business/v1/messages",
         headers={"Authorization": "Bearer business-secret", "Idempotency-Key": "order-1"},
         json={"phoneNumbers": ["+8613900000000"], "text": "hello"},
     )
@@ -284,7 +284,7 @@ Expected: route is 404 and application factory lacks message-service injection.
 
 - [ ] **Step 3: Implement route and wiring**
 
-Create a router with prefix `/api/v1`. A dependency validates the business Bearer Token with `secure_equals`; an authenticated body dependency reuses `parse_json_model()` so authentication precedes parsing. Normalize and validate `Idempotency-Key` in a header dependency. The endpoint calls the command service and returns `JSONResponse` with status 200 or 201 using `response.model_dump(by_alias=True, mode="json")`.
+Create a router with prefix `/business/v1`. A dependency validates the business Bearer Token with `secure_equals`; an authenticated body dependency reuses `parse_json_model()` so authentication precedes parsing. Normalize and validate `Idempotency-Key` in a header dependency. The endpoint calls the command service and returns `JSONResponse` with status 200 or 201 using `response.model_dump(by_alias=True, mode="json")`.
 
 Map domain errors to `IDEMPOTENCY_CONFLICT`, `STATE_CONFLICT`, `NO_AVAILABLE_DEVICE`, and `VALIDATION_ERROR`. Extend `create_app()` with optional message service/publisher injection and default construction from settings.
 
@@ -306,7 +306,7 @@ Expected: new API tests and both mobile interfaces pass.
 
 - [ ] **Step 1: Add production-flow integration test**
 
-Load `main.app` with a temporary TOML file and test-specific environment. Register a device, PATCH it online, call `POST /api/v1/messages`, replay the same request, and send a conflicting replay. Assert 201, 200, and 409; query all message-related tables and track the device ID for cleanup.
+Load `main.app` with a temporary TOML file and test-specific environment. Register a device, PATCH it online, call `POST /business/v1/messages`, replay the same request, and send a conflicting replay. Assert 201, 200, and 409; query all message-related tables and track the device ID for cleanup.
 
 - [ ] **Step 2: Run integration test**
 

@@ -65,7 +65,7 @@ def create_message_router(
         body = await parse_json_model(request, MessageCreateRequest)
         return AuthenticatedMessageRequest(body, idempotency_key)
 
-    router = APIRouter(prefix="/api/v1", tags=["business-message"])
+    router = APIRouter(prefix="/business/v1", tags=["business-message"])
 
     @router.post(
         "/messages",

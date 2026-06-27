@@ -41,7 +41,7 @@ def test_created_message_is_pulled_once_with_android_contract(clean_database):
         assert update.status_code == 200
 
         created = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers={
                 "Authorization": "Bearer business-secret",
                 "Idempotency-Key": key,

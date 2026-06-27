@@ -48,7 +48,7 @@ def _insert_contact(connection, clean_database, area: str, remark: str | None = 
 
 def _login(client: TestClient, username: str, password: str) -> str:
     response = client.post(
-        "/api/v1/auth/login",
+        "/agent/v1/auth/login",
         json={"username": username, "password": password},
     )
     assert response.status_code == 200
@@ -74,7 +74,7 @@ def test_agent_contact_list_returns_only_matching_area(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.get(
-            "/api/v1/contacts",
+            "/agent/v1/contacts",
             headers={"Authorization": f"Bearer {token}"},
         )
 
@@ -100,7 +100,7 @@ def test_agent_can_update_matching_contact_remark(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.patch(
-            f"/api/v1/contacts/{contact_id}/remark",
+            f"/agent/v1/contacts/{contact_id}/remark",
             headers={"Authorization": f"Bearer {token}"},
             json={"remark": "VIP customer"},
         )
@@ -130,7 +130,7 @@ def test_agent_can_clear_matching_contact_remark(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.patch(
-            f"/api/v1/contacts/{contact_id}/remark",
+            f"/agent/v1/contacts/{contact_id}/remark",
             headers={"Authorization": f"Bearer {token}"},
             json={"remark": "   "},
         )
@@ -160,7 +160,7 @@ def test_agent_contact_remark_rejects_cross_area_access(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.patch(
-            f"/api/v1/contacts/{contact_id}/remark",
+            f"/agent/v1/contacts/{contact_id}/remark",
             headers={"Authorization": f"Bearer {token}"},
             json={"remark": "not allowed"},
         )
@@ -206,7 +206,7 @@ def test_agent_menu_list_returns_only_matching_non_empty_area_menus(clean_databa
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.get(
-            "/api/v1/menus",
+            "/agent/v1/menus",
             headers={"Authorization": f"Bearer {token}"},
         )
 

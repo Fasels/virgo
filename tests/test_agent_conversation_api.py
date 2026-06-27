@@ -97,7 +97,7 @@ def _insert_conversation_fixture(connection, clean_database, area: str):
 
 def _login(client: TestClient, username: str, password: str) -> str:
     response = client.post(
-        "/api/v1/auth/login",
+        "/agent/v1/auth/login",
         json={"username": username, "password": password},
     )
     assert response.status_code == 200
@@ -135,7 +135,7 @@ def test_agent_conversation_list_returns_only_matching_area(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, north_user, password)
         response = client.get(
-            "/api/v1/conversations",
+            "/agent/v1/conversations",
             headers={"Authorization": f"Bearer {token}"},
         )
 
@@ -165,7 +165,7 @@ def test_agent_message_history_rejects_cross_area_access(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.get(
-            f"/api/v1/conversations/{south_conversation}/messages",
+            f"/agent/v1/conversations/{south_conversation}/messages",
             headers={"Authorization": f"Bearer {token}"},
         )
 
@@ -192,7 +192,7 @@ def test_agent_can_mark_matching_conversation_read(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.patch(
-            f"/api/v1/conversations/{conversation_id}/read",
+            f"/agent/v1/conversations/{conversation_id}/read",
             headers={"Authorization": f"Bearer {token}"},
         )
 
@@ -235,7 +235,7 @@ def test_agent_can_reply_to_matching_conversation_route(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.post(
-            f"/api/v1/conversations/{conversation_id}/messages",
+            f"/agent/v1/conversations/{conversation_id}/messages",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Idempotency-Key": key,
@@ -285,7 +285,7 @@ def test_agent_reply_requires_idempotency_key(clean_database):
     with TestClient(app, raise_server_exceptions=False) as client:
         token = _login(client, username, password)
         response = client.post(
-            f"/api/v1/conversations/{conversation_id}/messages",
+            f"/agent/v1/conversations/{conversation_id}/messages",
             headers={"Authorization": f"Bearer {token}"},
             json={"text": "客服回复"},
         )

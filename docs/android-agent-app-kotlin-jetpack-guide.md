@@ -31,7 +31,7 @@
 所有客服接口前缀：
 
 ```text
-/api/v1
+/agent/v1
 ```
 
 除登录接口外，其它接口都需要请求头：
@@ -51,7 +51,7 @@ Idempotency-Key: <每次发送唯一的UUID>
 ### 4.1 登录
 
 ```http
-POST /api/v1/auth/login
+POST /agent/v1/auth/login
 Content-Type: application/json
 ```
 
@@ -76,7 +76,7 @@ Content-Type: application/json
 ### 4.2 当前客服信息
 
 ```http
-GET /api/v1/me
+GET /agent/v1/me
 Authorization: Bearer <token>
 ```
 
@@ -93,7 +93,7 @@ Authorization: Bearer <token>
 ### 4.3 联系人列表
 
 ```http
-GET /api/v1/contacts
+GET /agent/v1/contacts
 Authorization: Bearer <token>
 ```
 
@@ -119,7 +119,7 @@ Authorization: Bearer <token>
 ### 4.4 修改联系人备注
 
 ```http
-PATCH /api/v1/contacts/{contactId}/remark
+PATCH /agent/v1/contacts/{contactId}/remark
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
@@ -151,7 +151,7 @@ Content-Type: application/json
 ### 4.5 会话列表
 
 ```http
-GET /api/v1/conversations
+GET /agent/v1/conversations
 Authorization: Bearer <token>
 ```
 
@@ -176,7 +176,7 @@ Authorization: Bearer <token>
 ### 4.6 消息历史
 
 ```http
-GET /api/v1/conversations/{conversationId}/messages
+GET /agent/v1/conversations/{conversationId}/messages
 Authorization: Bearer <token>
 ```
 
@@ -204,7 +204,7 @@ Authorization: Bearer <token>
 ### 4.7 标记会话已读
 
 ```http
-PATCH /api/v1/conversations/{conversationId}/read
+PATCH /agent/v1/conversations/{conversationId}/read
 Authorization: Bearer <token>
 ```
 
@@ -219,7 +219,7 @@ Authorization: Bearer <token>
 ### 4.8 客服回复短信
 
 ```http
-POST /api/v1/conversations/{conversationId}/messages
+POST /agent/v1/conversations/{conversationId}/messages
 Authorization: Bearer <token>
 Idempotency-Key: <UUID>
 Content-Type: application/json
@@ -244,7 +244,7 @@ Content-Type: application/json
 ### 4.9 快捷话术列表
 
 ```http
-GET /api/v1/menus
+GET /agent/v1/menus
 Authorization: Bearer <token>
 ```
 
@@ -265,7 +265,7 @@ Authorization: Bearer <token>
 ### 4.10 客服 SSE 事件
 
 ```http
-GET /api/v1/agent/events
+GET /agent/v1/events
 Authorization: Bearer <token>
 Accept: text/event-stream
 ```
@@ -402,42 +402,42 @@ data class AgentMenuItem(
 
 ```kotlin
 interface AgentApi {
-    @POST("/api/v1/auth/login")
+    @POST("/agent/v1/auth/login")
     suspend fun login(@Body body: AgentLoginRequest): AgentLoginResponse
 
-    @GET("/api/v1/me")
+    @GET("/agent/v1/me")
     suspend fun me(): AgentMeResponse
 
-    @GET("/api/v1/contacts")
+    @GET("/agent/v1/contacts")
     suspend fun contacts(): List<AgentContactItem>
 
-    @PATCH("/api/v1/contacts/{contactId}/remark")
+    @PATCH("/agent/v1/contacts/{contactId}/remark")
     suspend fun updateRemark(
         @Path("contactId") contactId: String,
         @Body body: UpdateRemarkRequest,
     ): OkResponse
 
-    @GET("/api/v1/conversations")
+    @GET("/agent/v1/conversations")
     suspend fun conversations(): List<AgentConversationItem>
 
-    @GET("/api/v1/conversations/{conversationId}/messages")
+    @GET("/agent/v1/conversations/{conversationId}/messages")
     suspend fun messages(
         @Path("conversationId") conversationId: String,
     ): List<AgentMessageItem>
 
-    @PATCH("/api/v1/conversations/{conversationId}/read")
+    @PATCH("/agent/v1/conversations/{conversationId}/read")
     suspend fun markRead(
         @Path("conversationId") conversationId: String,
     ): OkResponse
 
-    @POST("/api/v1/conversations/{conversationId}/messages")
+    @POST("/agent/v1/conversations/{conversationId}/messages")
     suspend fun reply(
         @Path("conversationId") conversationId: String,
         @Header("Idempotency-Key") idempotencyKey: String,
         @Body body: AgentReplyRequest,
     ): MessageCreateResponse
 
-    @GET("/api/v1/menus")
+    @GET("/agent/v1/menus")
     suspend fun menus(): List<AgentMenuItem>
 }
 
@@ -528,7 +528,7 @@ class AuthInterceptor(
 
 在聊天页底部提供“话术”按钮：
 
-1. 点击时调用 `GET /api/v1/menus`。
+1. 点击时调用 `GET /agent/v1/menus`。
 2. 使用 `ModalBottomSheet` 展示话术列表。
 3. 每条话术提供两个动作：
    - 复制到输入框
@@ -555,7 +555,7 @@ class AuthInterceptor(
 
 1. 输入备注。
 2. 点击保存。
-3. 调用 `PATCH /api/v1/contacts/{contactId}/remark`。
+3. 调用 `PATCH /agent/v1/contacts/{contactId}/remark`。
 4. 成功后刷新联系人列表。
 
 清空备注：
@@ -633,7 +633,7 @@ class AgentSseClient(
     fun connect(onInboundMessage: (conversationId: String, messageId: String) -> Unit) {
         val token = tokenProvider() ?: return
         val request = Request.Builder()
-            .url("$baseUrl/api/v1/agent/events")
+            .url("$baseUrl/agent/v1/events")
             .header("Authorization", "Bearer $token")
             .header("Accept", "text/event-stream")
             .build()

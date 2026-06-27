@@ -4,7 +4,7 @@
 
 **Goal:** Build agent-facing contact and menu APIs and keep contact area in sync with inbound SIM routing.
 
-**Architecture:** Extend the existing agent API layer under `/api/v1` with a focused service, schemas, and router for contacts and menus. Use `contacts.areas` for contact authorization and update that field from inbound SIM area during contact upsert.
+**Architecture:** Extend the existing agent API layer under `/agent/v1` with a focused service, schemas, and router for contacts and menus. Use `contacts.areas` for contact authorization and update that field from inbound SIM area during contact upsert.
 
 **Tech Stack:** FastAPI, Pydantic, psycopg 3, PostgreSQL, pytest, FastAPI TestClient.
 
@@ -50,11 +50,11 @@ Run the same command. Expected: contact-area propagation tests pass.
 - [ ] **Step 1: Write failing API tests**
 
 Cover:
-- `GET /api/v1/contacts` returns only contacts matching the authenticated agent area.
-- `PATCH /api/v1/contacts/{contactId}/remark` updates a matching contact.
-- `PATCH /api/v1/contacts/{contactId}/remark` clears blank remarks.
+- `GET /agent/v1/contacts` returns only contacts matching the authenticated agent area.
+- `PATCH /agent/v1/contacts/{contactId}/remark` updates a matching contact.
+- `PATCH /agent/v1/contacts/{contactId}/remark` clears blank remarks.
 - Cross-area remark update returns `403`.
-- `GET /api/v1/menus` returns only non-empty menus matching the authenticated agent area.
+- `GET /agent/v1/menus` returns only non-empty menus matching the authenticated agent area.
 
 - [ ] **Step 2: Run the failing API tests**
 
@@ -76,7 +76,7 @@ Add service methods for listing contacts, updating remarks with area authorizati
 
 - [ ] **Step 5: Create router and wire application**
 
-Add `/api/v1/contacts`, `/api/v1/contacts/{contactId}/remark`, and `/api/v1/menus`; include the router from `create_app`.
+Add `/agent/v1/contacts`, `/agent/v1/contacts/{contactId}/remark`, and `/agent/v1/menus`; include the router from `create_app`.
 
 - [ ] **Step 6: Run API tests**
 

@@ -73,7 +73,7 @@ def create_agent_conversation_router(
             return ApiError(403, "FORBIDDEN", "Conversation is outside agent area")
         return ApiError(404, "NOT_FOUND", "Conversation not found")
 
-    router = APIRouter(prefix="/api/v1", tags=["agent-conversation"])
+    router = APIRouter(prefix="/agent/v1", tags=["agent-conversation"])
 
     @router.get(
         "/conversations",

@@ -14,19 +14,19 @@ Add agent-facing APIs for contacts and reply menus so a customer-service agent c
 
 ## API
 
-- `GET /api/v1/contacts`
+- `GET /agent/v1/contacts`
   - Requires `Authorization: Bearer <agent-token>`.
   - Returns contacts where `contacts.areas` matches the agent area.
   - Sorts by `last_contact_at DESC NULLS LAST`, then `updated_at DESC`, then `id`.
 
-- `PATCH /api/v1/contacts/{contactId}/remark`
+- `PATCH /agent/v1/contacts/{contactId}/remark`
   - Requires `Authorization: Bearer <agent-token>`.
   - Body: `{"remark": "text"}`.
   - Empty or whitespace-only remark clears the stored remark.
   - Returns `{"ok": true}`.
   - Returns `403` when the contact exists but belongs to another area, and `404` when it does not exist.
 
-- `GET /api/v1/menus`
+- `GET /agent/v1/menus`
   - Requires `Authorization: Bearer <agent-token>`.
   - Returns local product menu rows whose `areas` matches the agent area and whose `menu` is non-empty.
   - Sorts by `update_time DESC`, then `id`.

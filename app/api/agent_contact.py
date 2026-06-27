@@ -44,7 +44,7 @@ def create_agent_contact_router(
             return ApiError(403, "FORBIDDEN", "Contact is outside agent area")
         return ApiError(404, "NOT_FOUND", "Contact not found")
 
-    router = APIRouter(prefix="/api/v1", tags=["agent-contact"])
+    router = APIRouter(prefix="/agent/v1", tags=["agent-contact"])
 
     @router.get("/contacts", response_model=list[AgentContactItem])
     def list_contacts(

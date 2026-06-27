@@ -142,7 +142,7 @@ Expected: all focused and existing mobile API tests pass.
 
 - [ ] **Step 1: Write the PostgreSQL flow test**
 
-Register and PATCH an online device, register an SSE connection on the injected registry, call `POST /api/v1/messages`, read one SSE event, and query PostgreSQL. Assert the event targets the created message and the row remains `state='Pending'` with `pulled_at IS NULL`.
+Register and PATCH an online device, register an SSE connection on the injected registry, call `POST /business/v1/messages`, read one SSE event, and query PostgreSQL. Assert the event targets the created message and the row remains `state='Pending'` with `pulled_at IS NULL`.
 
 - [ ] **Step 2: Run integration tests when Docker is available**
 

@@ -58,7 +58,7 @@ def post(client, *, token="business-secret", key="request-1", **kwargs):
         headers["Authorization"] = f"Bearer {token}"
     if key is not None:
         headers["Idempotency-Key"] = key
-    return client.post("/api/v1/messages", headers=headers, **kwargs)
+    return client.post("/business/v1/messages", headers=headers, **kwargs)
 
 
 def assert_error(response, status, code, message):

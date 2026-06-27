@@ -106,7 +106,7 @@ All protected endpoints use `Authorization: Bearer <token>`.
 | `POST` | `/mobile/v1/device` | `private_registration_token` | Register a mobile SMS device and its SIM cards. |
 | `PATCH` | `/mobile/v1/device` | Device token | Update device metadata, push token, or SIM card state. |
 | `GET` | `/mobile/v1/events` | Device token | Open an SSE stream for real-time outbound message notifications. |
-| `POST` | `/api/v1/messages` | `business_api_token` | Create an outbound SMS task. Requires `Idempotency-Key`. |
+| `POST` | `/business/v1/messages` | `business_api_token` | Create an outbound SMS task. Requires `Idempotency-Key`. |
 | `GET` | `/mobile/v1/message?order=fifo` | Device token | Pull pending outbound messages. `order` can be `fifo` or `lifo`. |
 | `PATCH` | `/mobile/v1/message` | Device token | Report delivery state for one or more messages. |
 | `POST` | `/mobile/v1/inbox` | Device token | Submit inbound SMS records from a mobile device. |

@@ -25,7 +25,7 @@ def test_device_reports_sent_and_delivered_idempotently(clean_database):
             json={"id": credentials["id"], "pushToken": marker, "simCards": [{"slotIndex": 0, "simNumber": 1}]},
         ).status_code == 200
         created_response = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers={"Authorization": "Bearer business-secret", "Idempotency-Key": key},
             json={"phoneNumbers": [phone], "text": "status integration"},
         )

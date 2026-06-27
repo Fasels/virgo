@@ -45,17 +45,17 @@ def test_business_api_creates_and_replays_message_in_postgres(clean_database):
             "Idempotency-Key": key,
         }
         first = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers=headers,
             json={"phoneNumbers": [phone], "text": "integration message"},
         )
         replay = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers=headers,
             json={"phoneNumbers": [phone], "text": "integration message"},
         )
         conflict = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers=headers,
             json={"phoneNumbers": [phone], "text": "different message"},
         )

@@ -47,7 +47,7 @@ def create_agent_auth_router(
     ) -> AuthenticatedAgent:
         return authenticate_agent_header(auth_service, authorization)
 
-    router = APIRouter(prefix="/api/v1", tags=["agent-auth"])
+    router = APIRouter(prefix="/agent/v1", tags=["agent-auth"])
 
     @router.post("/auth/login", response_model=AgentLoginResponse)
     def login(body: AgentLoginRequest = Depends(login_request)) -> AgentLoginResponse:

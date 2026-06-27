@@ -23,9 +23,9 @@ def create_agent_events_router(
     ) -> AuthenticatedAgent:
         return authenticate_agent_header(auth_service, authorization)
 
-    router = APIRouter(prefix="/api/v1", tags=["agent-events"])
+    router = APIRouter(prefix="/agent/v1", tags=["agent-events"])
 
-    @router.get("/agent/events")
+    @router.get("/events")
     def events(
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> StreamingResponse:

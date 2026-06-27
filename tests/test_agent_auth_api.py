@@ -25,12 +25,12 @@ def test_agent_login_returns_token_and_me(clean_database):
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
     with TestClient(app, raise_server_exceptions=False) as client:
         login = client.post(
-            "/api/v1/auth/login",
+            "/agent/v1/auth/login",
             json={"username": username, "password": password},
         )
         assert login.status_code == 200
         token = login.json()["token"]
-        me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+        me = client.get("/agent/v1/me", headers={"Authorization": f"Bearer {token}"})
 
     assert me.status_code == 200
     assert me.json() == {"id": account_id, "username": username, "areas": "north"}
@@ -51,7 +51,7 @@ def test_agent_login_rejects_wrong_password(clean_database):
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
-            "/api/v1/auth/login",
+            "/agent/v1/auth/login",
             json={"username": username, "password": "wrong-password"},
         )
 

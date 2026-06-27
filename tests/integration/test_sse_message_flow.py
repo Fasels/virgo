@@ -48,7 +48,7 @@ def test_committed_message_is_published_to_target_device_without_state_change(
 
         connection = registry.register(credentials["id"])
         created = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers={
                 "Authorization": "Bearer business-secret",
                 "Idempotency-Key": key,

@@ -94,7 +94,7 @@ def test_outbound_conversation_copies_area_from_selected_sim(clean_database):
             connection.commit()
 
         response = client.post(
-            "/api/v1/messages",
+            "/business/v1/messages",
             headers={
                 "Authorization": "Bearer business-secret",
                 "Idempotency-Key": key,

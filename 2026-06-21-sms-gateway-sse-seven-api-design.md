@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | `POST /mobile/v1/device` | Android → 网关服务器 | 注册令牌、注册码、Basic 或受控匿名注册 | 注册设备、上报 SIM、取得设备 Token | 是，现有项目已实现 |
 | 2 | `PATCH /mobile/v1/device` | Android → 网关服务器 | `Bearer <device_token>` | 更新设备、Push Token、SIM 信息和在线时间 | 是，现有项目已实现 |
-| 3 | `POST /api/v1/messages` | 业务系统 → 网关服务器 | `Bearer <api_token>` | 创建并路由一条出站短信任务 | 否，手机不调用业务接口 |
+| 3 | `POST /business/v1/messages` | 业务系统 → 网关服务器 | `Bearer <api_token>` | 创建并路由一条出站短信任务 | 否，手机不调用业务接口 |
 | 4 | `GET /mobile/v1/events` | Android → 网关服务器 | `Bearer <device_token>` | 建立 SSE 长连接，接收 `MessageEnqueued`通知 | 连接已实现；事件后立即拉取需调整 |
 | 5 | `GET /mobile/v1/message?order=fifo` | Android → 网关服务器 | `Bearer <device_token>` | SSE 通知后拉取分配给当前手机的完整短信任务 | 是，现有项目已实现 |
 | 6 | `PATCH /mobile/v1/message` | Android → 网关服务器 | `Bearer <device_token>` | 回传发送、送达或失败状态 | 是，现有项目已实现 |
@@ -53,7 +53,7 @@
 | --- | --- |
 | Android 手机 | 注册设备、上报 SIM、维持 SSE 连接、收到事件后拉取任务、调用 `SmsManager`、回传状态、上传收到的短信 |
 | 网关服务器 | 设备认证、路由任务、维护设备事件连接、发送 `MessageEnqueued`、保存状态、匹配会话、提供业务接口 |
-| 业务系统 | 调用 `POST /api/v1/messages` 创建短信任务 |
+| 业务系统 | 调用 `POST /business/v1/messages` 创建短信任务 |
 | 外部联系人 | 接收手机发出的短信，或向手机回复短信 |
 
 ### 2.2 URL 约定
@@ -75,7 +75,7 @@ http://<server-host>:<port>/mobile/v1/events
 业务侧接口使用：
 
 ```text
-http://<server-host>:<port>/api/v1
+http://<server-host>:<port>/business/v1
 ```
 
 生产环境应使用 HTTPS。使用局域网 HTTP 时，需要在 Android 中允许目标地址的明文网络流量，并承担同网段窃取 Token 的风险。
@@ -139,7 +139,7 @@ Authorization: Bearer <device_token>
 Authorization: Bearer <api_token>
 ```
 
-设备 Token 和业务 API Token 必须属于不同的认证域。设备 Token 不得调用 `/api/v1/*`，业务 API Token 不得冒充设备调用 `/mobile/v1/*`。
+设备 Token 和业务 API Token 必须属于不同的认证域。设备 Token 不得调用 `/business/v1/*`，业务 API Token 不得冒充设备调用 `/mobile/v1/*`。
 
 ### 3.5 统一错误格式
 
@@ -436,7 +436,7 @@ Content-Type: application/json
 ### 7.1 请求
 
 ```http
-POST /api/v1/messages
+POST /business/v1/messages
 Authorization: Bearer <api_token>
 Idempotency-Key: order-123-sms-1
 Content-Type: application/json
@@ -681,7 +681,7 @@ messageId: msg_001
 
 严格按照以下顺序：
 
-1. `POST /api/v1/messages`完成参数和幂等校验。
+1. `POST /business/v1/messages`完成参数和幂等校验。
 2. 服务器选择设备和 SIM。
 3. 数据库事务创建 `messages`、接收人和 `Pending`状态历史。
 4. 数据库事务成功提交。
@@ -1235,7 +1235,7 @@ created_at=now
 
 | 步骤 | 阶段 | 执行方 | 接口/动作 | 关键结果 |
 | ---: | --- | --- | --- | --- |
-| 1 | 创建发送任务 | 业务系统 → 服务器 | `POST /api/v1/messages` | 完成认证、参数校验和业务幂等 |
+| 1 | 创建发送任务 | 业务系统 → 服务器 | `POST /business/v1/messages` | 完成认证、参数校验和业务幂等 |
 | 2 | 服务器选择手机和 SIM | 服务器 | 路由设备与 SIM | 确定唯一 `device_id`和`sim_card_id` |
 | 3 | 创建出站消息 | 服务器 | 数据库事务 | 创建 `OUTBOUND/Pending`消息、接收人、会话和状态历史 |
 | 4 | 通过 SSE 发送通知 | 服务器 → Android | `event: MessageEnqueued` | 只通知目标设备，不携带完整任务 |
@@ -1246,7 +1246,7 @@ created_at=now
 
 #### 步骤 1：创建发送任务
 
-业务系统调用 `POST /api/v1/messages`。服务器必须先验证业务 API Token、`Idempotency-Key`、目标号码、短信正文和时间字段。幂等键命中相同内容时返回原任务，命中不同内容时返回 `409`。
+业务系统调用 `POST /business/v1/messages`。服务器必须先验证业务 API Token、`Idempotency-Key`、目标号码、短信正文和时间字段。幂等键命中相同内容时返回原任务，命中不同内容时返回 `409`。
 
 #### 步骤 2：服务器选择手机和 SIM
 
@@ -1501,7 +1501,7 @@ WorkManager POST /mobile/v1/inbox
 2. 实现统一错误响应、请求 ID 和设备/业务认证中间件。
 3. 实现 `POST /mobile/v1/device`和`PATCH /mobile/v1/device`。
 4. 实现联系人、会话、消息、状态历史的 Repository 和事务服务。
-5. 实现 `POST /api/v1/messages`及幂等和路由。
+5. 实现 `POST /business/v1/messages`及幂等和路由。
 6. 实现 `GET /mobile/v1/events`、连接注册表、心跳和事务提交后的设备事件发布。
 7. 修改 Android SSE 事件处理：连接成功和收到 `MessageEnqueued`时执行一次性立即拉取，同时保留周期 Worker。
 8. 实现 `GET /mobile/v1/message`，并用集成测试验证返回 JSON 能被 Android DTO 解析。
