@@ -16,6 +16,19 @@ CREATE INDEX idx_accounts_areas ON accounts(areas);
 CREATE INDEX idx_accounts_use_sims ON accounts(use_sims_id);
 CREATE INDEX idx_accounts_status ON accounts(status);
 
+CREATE TABLE account_sim_cards (
+    account_id  VARCHAR(64) NOT NULL
+                REFERENCES accounts(id) ON DELETE CASCADE,
+    sim_card_id VARCHAR(64) NOT NULL
+                REFERENCES sim_cards(id) ON DELETE CASCADE,
+    created_at  BIGINT NOT NULL DEFAULT ((EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT),
+
+    PRIMARY KEY (account_id, sim_card_id)
+);
+
+CREATE INDEX idx_account_sim_cards_sim_card
+    ON account_sim_cards(sim_card_id);
+
 CREATE TABLE agent_sessions (
     token_hash VARCHAR(255) PRIMARY KEY,
     account_id VARCHAR(64) NOT NULL

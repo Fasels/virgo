@@ -8,6 +8,7 @@ from pg.admin_service import (
     ProductUpdate,
     SimCardUpdate,
 )
+from pg.admin_ui import _account_option_labels
 
 
 class RecordingCursor:
@@ -52,14 +53,15 @@ class RecordingDatabase:
 
 
 def test_list_rows_uses_allowed_columns_and_hides_password_hash():
-    database = RecordingDatabase(rows=[{"id": "acc_1", "username": "alice"}])
+    database = RecordingDatabase(rows=[{"id": "acc_1", "username": "alice", "use_sims_id": "sim_1,sim_2"}])
     service = PgAdminService(database)
 
     rows = service.list_rows("accounts")
 
-    assert rows == [{"id": "acc_1", "username": "alice"}]
+    assert rows == [{"id": "acc_1", "username": "alice", "use_sims_id": "sim_1,sim_2"}]
     assert "FROM accounts" in database.statements[0]
     assert "password_hash" not in database.statements[0]
+    assert "account_sim_cards" in database.statements[0]
     assert database.params[0] == (200,)
 
 
@@ -122,6 +124,63 @@ def test_delete_product_removes_by_id():
     assert database.params[0] == ("prod_1",)
 
 
+def test_list_account_options_returns_product_update_by_choices():
+    database = RecordingDatabase(
+        rows=[
+            {"id": "acc_1", "username": "alice"},
+            {"id": "acc_2", "username": "bob"},
+        ]
+    )
+    service = PgAdminService(database)
+
+    options = service.list_account_options()
+
+    assert options == [
+        {"id": "acc_1", "username": "alice"},
+        {"id": "acc_2", "username": "bob"},
+    ]
+    assert database.statements[0] == (
+        "SELECT id, username FROM accounts ORDER BY username ASC, id ASC"
+    )
+
+
+def test_account_option_labels_show_username_and_keep_id_value():
+    labels = _account_option_labels(
+        [
+            {"id": "acc_1", "username": "alice"},
+            {"id": "acc_2", "username": ""},
+        ]
+    )
+
+    assert labels == {
+        "acc_1": "alice / acc_1",
+        "acc_2": "acc_2",
+    }
+
+
+def test_unregister_device_disables_device_and_owned_sim_cards_without_deleting():
+    database = RecordingDatabase()
+    service = PgAdminService(database, now_ms=lambda: 456789)
+
+    service.unregister_device("dev_1")
+
+    assert database.statements == [
+        (
+            "UPDATE devices SET enabled = FALSE, status = 'disabled', "
+            "unregistered_at = %s, updated_at = %s WHERE id = %s"
+        ),
+        (
+            "UPDATE sim_cards SET enabled = FALSE, status = 'disabled', "
+            "unregistered_at = %s, updated_at = %s WHERE device_id = %s"
+        ),
+    ]
+    assert database.params == [
+        (456789, 456789, "dev_1"),
+        (456789, 456789, "dev_1"),
+    ]
+    assert all("DELETE" not in statement for statement in database.statements)
+
+
 def test_create_account_hashes_password():
     database = RecordingDatabase()
     service = PgAdminService(database)
@@ -132,7 +191,7 @@ def test_create_account_hashes_password():
             username="alice",
             password="secret",
             areas="CN",
-            use_sims_id="sim_1",
+            use_sims_ids=("sim_1", "sim_2"),
             status="ACTIVE",
         )
     )
@@ -144,6 +203,12 @@ def test_create_account_hashes_password():
     assert params[2].startswith("pbkdf2_sha256$")
     assert params[2] != "secret"
     assert params[3:] == ("CN", "sim_1", "ACTIVE")
+    assert database.statements[1] == (
+        "INSERT INTO account_sim_cards (account_id, sim_card_id) "
+        "VALUES (%s, %s)"
+    )
+    assert database.params[1] == ("acc_1", "sim_1")
+    assert database.params[2] == ("acc_1", "sim_2")
 
 
 def test_update_account_without_password_does_not_touch_password_hash():
@@ -156,7 +221,7 @@ def test_update_account_without_password_does_not_touch_password_hash():
             username="alice",
             password="",
             areas="CN",
-            use_sims_id=None,
+            use_sims_ids=("sim_2", "sim_3"),
             status="DISABLED",
         ),
     )
@@ -164,7 +229,11 @@ def test_update_account_without_password_does_not_touch_password_hash():
     statement = database.statements[0]
     assert "UPDATE accounts" in statement
     assert "password_hash" not in statement
-    assert database.params[0] == ("alice", "CN", None, "DISABLED", "acc_1")
+    assert database.params[0] == ("alice", "CN", "sim_2", "DISABLED", "acc_1")
+    assert database.statements[1] == "DELETE FROM account_sim_cards WHERE account_id = %s"
+    assert database.params[1] == ("acc_1",)
+    assert database.params[2] == ("acc_1", "sim_2")
+    assert database.params[3] == ("acc_1", "sim_3")
 
 
 def test_update_account_with_password_updates_password_hash():
@@ -177,7 +246,7 @@ def test_update_account_with_password_updates_password_hash():
             username="alice",
             password="new-secret",
             areas="CN",
-            use_sims_id="sim_1",
+            use_sims_ids=("sim_1",),
             status="ACTIVE",
         ),
     )
@@ -189,6 +258,29 @@ def test_update_account_with_password_updates_password_hash():
     assert params[1].startswith("pbkdf2_sha256$")
     assert params[1] != "new-secret"
     assert params[2:] == ("CN", "sim_1", "ACTIVE", "acc_1")
+    assert database.statements[1] == "DELETE FROM account_sim_cards WHERE account_id = %s"
+    assert database.params[1] == ("acc_1",)
+    assert database.params[2] == ("acc_1", "sim_1")
+
+
+def test_update_account_accepts_comma_separated_sim_ids_for_compatibility():
+    database = RecordingDatabase()
+    service = PgAdminService(database)
+
+    service.update_account(
+        "acc_1",
+        AccountUpdate(
+            username="alice",
+            password="",
+            areas="CN",
+            use_sims_ids="sim_1, sim_2",
+            status="ACTIVE",
+        ),
+    )
+
+    assert database.params[0] == ("alice", "CN", "sim_1", "ACTIVE", "acc_1")
+    assert database.params[2] == ("acc_1", "sim_1")
+    assert database.params[3] == ("acc_1", "sim_2")
 
 
 def test_delete_account_removes_by_id():
@@ -199,6 +291,35 @@ def test_delete_account_removes_by_id():
 
     assert database.statements[0] == "DELETE FROM accounts WHERE id = %s"
     assert database.params[0] == ("acc_1",)
+
+
+def test_list_sim_card_options_returns_phone_labels_source_data():
+    database = RecordingDatabase(
+        rows=[
+            {
+                "id": "sim_1",
+                "phone_number": "+8613800000000",
+                "device_id": "dev_1",
+                "sim_number": 1,
+            }
+        ]
+    )
+    service = PgAdminService(database)
+
+    options = service.list_sim_card_options()
+
+    assert options == [
+        {
+            "id": "sim_1",
+            "phone_number": "+8613800000000",
+            "device_id": "dev_1",
+            "sim_number": 1,
+        }
+    ]
+    assert database.statements[0] == (
+        "SELECT id, phone_number, device_id, sim_number FROM sim_cards "
+        "ORDER BY phone_number ASC NULLS LAST, device_id ASC, sim_number ASC"
+    )
 
 
 def test_update_sim_card_changes_only_allowed_fields_and_refreshes_updated_at():

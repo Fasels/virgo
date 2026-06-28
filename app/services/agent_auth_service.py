@@ -18,7 +18,7 @@ class InvalidAgentToken(Exception):
 class AuthenticatedAgent:
     id: str
     username: str
-    areas: str
+    areas: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +44,7 @@ class AgentAuthService:
                 """,
                 (username,),
             ).fetchone()
-            if row is None or row[4] != "ACTIVE" or not row[3]:
+            if row is None or row[4] != "ACTIVE":
                 raise InvalidAgentCredentials
             if not verify_password(password, row[2]):
                 raise InvalidAgentCredentials
@@ -73,6 +73,6 @@ class AgentAuthService:
                 """,
                 (hash_sha256(token),),
             ).fetchone()
-        if row is None or row[3] != "ACTIVE" or row[4] <= now or not row[2]:
+        if row is None or row[3] != "ACTIVE" or row[4] <= now:
             raise InvalidAgentToken
         return AuthenticatedAgent(id=row[0], username=row[1], areas=row[2])

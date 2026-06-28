@@ -34,6 +34,7 @@ FIELD_LABELS = {
     "enabled": "启用",
     "status": "状态",
     "last_seen_at": "最近心跳",
+    "unregistered_at": "注销时间",
     "registered": "注册时间",
     "created_at": "创建时间",
     "updated_at": "更新时间",
@@ -69,6 +70,7 @@ TIME_FIELDS = {
     "registered",
     "last_used_at",
     "last_contact_at",
+    "unregistered_at",
     "update_time",
 }
 
@@ -159,7 +161,22 @@ def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> Non
 
     with ui.row().classes("items-center gap-2"):
         ui.button(icon="refresh", on_click=refresh).tooltip("刷新")
-        if table_name == "products":
+        if table_name == "devices":
+            ui.button(
+                icon="delete",
+                color="negative",
+                on_click=lambda: _with_selected(
+                    ui,
+                    table,
+                    lambda row: _confirm_unregister_device(
+                        ui,
+                        row["id"],
+                        lambda: service.unregister_device(row["id"]),
+                        refresh,
+                    ),
+                ),
+            ).tooltip("注销设备")
+        elif table_name == "products":
             ui.button(icon="add", on_click=lambda: _open_product_dialog(ui, service, refresh)).tooltip("新增商品")
             ui.button(
                 icon="edit",
@@ -256,6 +273,43 @@ def _format_unix_milliseconds(value: Any, timezone: tzinfo | None = None) -> Any
     return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _sim_card_option_labels(options: list[dict[str, Any]]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for option in options:
+        sim_id = str(option["id"])
+        phone_number = option.get("phone_number")
+        if isinstance(phone_number, str) and phone_number.strip():
+            labels[sim_id] = phone_number.strip()
+            continue
+        labels[sim_id] = (
+            f"{sim_id} / {option.get('device_id') or '-'} / "
+            f"SIM {option.get('sim_number') or '-'}"
+        )
+    return labels
+
+
+def _account_option_labels(options: list[dict[str, Any]]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for option in options:
+        account_id = str(option["id"])
+        username = option.get("username")
+        if isinstance(username, str) and username.strip():
+            labels[account_id] = f"{username.strip()} / {account_id}"
+            continue
+        labels[account_id] = account_id
+    return labels
+
+
+def _parse_sim_card_ids(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        values = value.split(",")
+    else:
+        values = value
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
 def _with_selected(ui: Any, table: Any, action: Any) -> None:
     if not table.selected:
         ui.notify("请先选择一行", type="warning")
@@ -275,7 +329,12 @@ def _open_product_dialog(
         product_id = ui.input("ID", value=(row or {}).get("id", "")).props("outlined dense").classes("w-full")
         product_id.set_enabled(not editing)
         menu = ui.textarea("客服提醒", value=(row or {}).get("menu") or "").props("outlined autogrow").classes("w-full")
-        update_by = ui.input("更新账号", value=(row or {}).get("update_by") or "").props("outlined dense").classes("w-full")
+        update_by = ui.select(
+            _account_option_labels(service.list_account_options()),
+            label="更新账号",
+            value=(row or {}).get("update_by") or None,
+            clearable=True,
+        ).props("outlined dense").classes("w-full")
         areas = ui.input("地区", value=(row or {}).get("areas") or "").props("outlined dense").classes("w-full")
 
         def save() -> None:
@@ -325,7 +384,12 @@ def _open_account_dialog(
         password_label = "新密码" if editing else "密码"
         password = ui.input(password_label, password=True, password_toggle_button=True).props("outlined dense").classes("w-full")
         areas = ui.input("地区", value=(row or {}).get("areas") or "").props("outlined dense").classes("w-full")
-        use_sims_id = ui.input("使用 SIM", value=(row or {}).get("use_sims_id") or "").props("outlined dense").classes("w-full")
+        use_sims_id = ui.select(
+            _sim_card_option_labels(service.list_sim_card_options()),
+            label="使用 SIM",
+            value=_parse_sim_card_ids((row or {}).get("use_sims_id")),
+            multiple=True,
+        ).props("outlined dense use-chips").classes("w-full")
         status = ui.select(
             ["ACTIVE", "DISABLED"],
             label="状态",
@@ -341,7 +405,7 @@ def _open_account_dialog(
                             username=username.value,
                             password=password.value,
                             areas=areas.value,
-                            use_sims_id=use_sims_id.value,
+                            use_sims_ids=tuple(_parse_sim_card_ids(use_sims_id.value)),
                             status=status.value,
                         ),
                     )
@@ -352,7 +416,7 @@ def _open_account_dialog(
                             username=username.value,
                             password=password.value,
                             areas=areas.value,
-                            use_sims_id=use_sims_id.value,
+                            use_sims_ids=tuple(_parse_sim_card_ids(use_sims_id.value)),
                             status=status.value,
                         )
                     )
@@ -440,4 +504,30 @@ def _confirm_delete(
         with ui.row().classes("justify-end w-full gap-2"):
             ui.button("取消", on_click=dialog.close).props("flat")
             ui.button("删除", icon="delete", color="negative", on_click=confirm)
+    dialog.open()
+
+
+def _confirm_unregister_device(
+    ui: Any,
+    device_id: str,
+    unregister_action: Any,
+    refresh: Any,
+) -> None:
+    with ui.dialog() as dialog, ui.card().classes("gap-3"):
+        ui.label("注销设备").classes("text-base font-medium")
+        ui.label(device_id).classes("text-sm opacity-70")
+        ui.label("不会删除数据库记录，会禁用该设备及其 SIM 卡。").classes("text-sm")
+
+        def confirm() -> None:
+            try:
+                unregister_action()
+                dialog.close()
+                refresh()
+                ui.notify("设备已注销", type="positive")
+            except Exception:
+                ui.notify("注销失败，请检查数据库连接", type="negative")
+
+        with ui.row().classes("justify-end w-full gap-2"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("注销", icon="delete", color="negative", on_click=confirm)
     dialog.open()

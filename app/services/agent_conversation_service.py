@@ -28,19 +28,20 @@ class AgentConversationService:
         self._database = database
         self._message_service = message_service
 
-    def list_conversations(self, agent_area: str) -> list[AgentConversationItem]:
+    def list_conversations(self, agent: AuthenticatedAgent) -> list[AgentConversationItem]:
         with self._database.transaction() as connection:
             rows = connection.execute(
                 """
-                SELECT id, external_phone_number, contact_id, areas, status,
-                       unread_count, last_message_preview, last_message_direction,
-                       last_message_at
-                FROM conversations
-                WHERE status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND NULLIF(BTRIM(areas), '') = NULLIF(BTRIM(%s), '')
-                ORDER BY last_message_at DESC NULLS LAST, updated_at DESC, id
+                SELECT c.id, c.external_phone_number, c.contact_id, c.areas,
+                       c.status, c.unread_count, c.last_message_preview,
+                       c.last_message_direction, c.last_message_at
+                FROM conversations c
+                JOIN account_sim_cards acs ON acs.sim_card_id = c.sim_card_id
+                WHERE c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
+                  AND acs.account_id = %s
+                ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC, c.id
                 """,
-                (agent_area,),
+                (agent.id,),
             ).fetchall()
         return [
             AgentConversationItem(
@@ -60,9 +61,9 @@ class AgentConversationService:
     def list_messages(
         self,
         conversation_id: str,
-        agent_area: str,
+        agent: AuthenticatedAgent,
     ) -> list[AgentMessageItem]:
-        self._ensure_access(conversation_id, agent_area)
+        self._ensure_access(conversation_id, agent.id)
         with self._database.transaction() as connection:
             rows = connection.execute(
                 """
@@ -93,19 +94,24 @@ class AgentConversationService:
             for row in rows
         ]
 
-    def mark_read(self, conversation_id: str, agent_area: str) -> None:
-        self._ensure_access(conversation_id, agent_area)
+    def mark_read(self, conversation_id: str, agent: AuthenticatedAgent) -> None:
+        self._ensure_access(conversation_id, agent.id)
         now = time.time_ns() // 1_000_000
         with self._database.transaction() as connection:
             connection.execute(
                 """
-                UPDATE conversations
+                UPDATE conversations c
                 SET unread_count = 0,
                     updated_at = %s
-                WHERE id = %s
-                  AND NULLIF(BTRIM(areas), '') = NULLIF(BTRIM(%s), '')
+                WHERE c.id = %s
+                  AND EXISTS (
+                      SELECT 1
+                      FROM account_sim_cards acs
+                      WHERE acs.account_id = %s
+                        AND acs.sim_card_id = c.sim_card_id
+                  )
                 """,
-                (now, conversation_id, agent_area),
+                (now, conversation_id, agent.id),
             )
 
     def reply(
@@ -115,7 +121,7 @@ class AgentConversationService:
         request: AgentReplyRequest,
         idempotency_key: str,
     ) -> MessageCreateResult:
-        conversation = self._load_reply_conversation(conversation_id, agent.areas)
+        conversation = self._load_reply_conversation(conversation_id, agent.id)
         return self._message_service.create(
             MessageCreateRequest(
                 phoneNumbers=[conversation[0]],
@@ -128,8 +134,8 @@ class AgentConversationService:
             idempotency_key,
         )
 
-    def _load_reply_conversation(self, conversation_id: str, agent_area: str):
-        self._ensure_access(conversation_id, agent_area)
+    def _load_reply_conversation(self, conversation_id: str, account_id: str):
+        self._ensure_access(conversation_id, account_id)
         with self._database.transaction() as connection:
             return connection.execute(
                 """
@@ -140,17 +146,18 @@ class AgentConversationService:
                 (conversation_id,),
             ).fetchone()
 
-    def _ensure_access(self, conversation_id: str, agent_area: str) -> None:
+    def _ensure_access(self, conversation_id: str, account_id: str) -> None:
         with self._database.transaction() as connection:
             allowed = connection.execute(
                 """
-                SELECT id
-                FROM conversations
-                WHERE id = %s
-                  AND status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND NULLIF(BTRIM(areas), '') = NULLIF(BTRIM(%s), '')
+                SELECT c.id
+                FROM conversations c
+                JOIN account_sim_cards acs ON acs.sim_card_id = c.sim_card_id
+                WHERE c.id = %s
+                  AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
+                  AND acs.account_id = %s
                 """,
-                (conversation_id, agent_area),
+                (conversation_id, account_id),
             ).fetchone()
             if allowed is not None:
                 return

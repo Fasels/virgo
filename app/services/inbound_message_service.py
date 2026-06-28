@@ -26,6 +26,8 @@ class InboundResult:
     conversation_id: str
     created: bool
     areas: str | None = None
+    sim_card_id: str | None = None
+    agent_account_ids: tuple[str, ...] = ()
 
 
 class InboundMessageService:
@@ -62,6 +64,21 @@ class InboundMessageService:
                         "SELECT id,sim_number,areas FROM sim_cards WHERE device_id=%s AND regexp_replace(phone_number,'[\\s()\\-]','','g')=%s LIMIT 1",
                         (device_id,normalized_recipient),).fetchone()
             sim_id=sim[0] if sim else None; sim_number=sim[1] if sim else request.sim_number; area=sim[2] if sim else None
+            agent_account_ids=()
+            if sim_id is not None:
+                agent_account_ids=tuple(
+                    row[0] for row in connection.execute(
+                        """
+                        SELECT a.id
+                        FROM account_sim_cards acs
+                        JOIN accounts a ON a.id = acs.account_id
+                        WHERE acs.sim_card_id = %s
+                          AND a.status = 'ACTIVE'
+                        ORDER BY a.id
+                        """,
+                        (sim_id,),
+                    ).fetchall()
+                )
             connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(f"conversation:{device_id}:{request.sender}:{sim_id or 'none'}",))
             contact_id=f"contact_{secrets.token_hex(16)}"
             contact_id=connection.execute(
@@ -89,10 +106,10 @@ class InboundMessageService:
             preview=text[:255] if text else "[Data SMS]"
             connection.execute("""UPDATE conversations SET unread_count=unread_count+1,last_message_preview=%s,last_message_direction='INBOUND',last_message_at=%s,updated_at=%s WHERE id=%s""",(preview,received,now,conversation_id))
             connection.execute("UPDATE devices SET status='online',last_seen_at=%s,updated_at=%s WHERE id=%s",(now,now,device_id))
-            result=InboundResult(message_id,conversation_id,True,area)
+            result=InboundResult(message_id,conversation_id,True,area,sim_id,agent_account_ids)
         try: self._publisher.publish(device_id,result.id,result.conversation_id)
         except Exception: logger.exception("Inbound publisher failed for message %s",result.id)
-        if result.areas:
-            try: self._agent_publisher.publish_inbound_message(result.areas,result.id,result.conversation_id)
+        for account_id in result.agent_account_ids:
+            try: self._agent_publisher.publish_inbound_message(account_id,result.id,result.conversation_id,result.sim_card_id)
             except Exception: logger.exception("Agent event publisher failed for message %s",result.id)
         return result

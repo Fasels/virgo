@@ -12,16 +12,18 @@ _CLOSE = object()
 def encode_agent_event(
     event_name: str,
     *,
-    areas: str,
+    account_id: str,
     conversation_id: str,
     message_id: str,
+    sim_card_id: str | None = None,
 ) -> str:
     encoded_id = json.dumps(message_id, ensure_ascii=False)[1:-1]
     data = json.dumps(
         {
             "conversationId": conversation_id,
             "messageId": message_id,
-            "areas": areas,
+            "accountId": account_id,
+            "simCardId": sim_card_id,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -40,7 +42,7 @@ def encode_heartbeat() -> str:
 
 @dataclass(slots=True)
 class AgentEventConnection:
-    areas: str
+    account_id: str
     events: Queue[object] = field(default_factory=Queue)
     closed: Event = field(default_factory=Event)
 
@@ -58,39 +60,41 @@ class AgentEventRegistry:
         self._connections: dict[str, AgentEventConnection] = {}
         self._lock = Lock()
 
-    def register(self, areas: str) -> AgentEventConnection:
-        connection = AgentEventConnection(areas)
+    def register(self, account_id: str) -> AgentEventConnection:
+        connection = AgentEventConnection(account_id)
         with self._lock:
-            previous = self._connections.get(areas)
-            self._connections[areas] = connection
+            previous = self._connections.get(account_id)
+            self._connections[account_id] = connection
         if previous is not None:
             previous.close()
         return connection
 
     def unregister(self, connection: AgentEventConnection) -> None:
         with self._lock:
-            if self._connections.get(connection.areas) is connection:
-                del self._connections[connection.areas]
+            if self._connections.get(connection.account_id) is connection:
+                del self._connections[connection.account_id]
         connection.close()
 
     def publish(
         self,
         event_name: str,
         *,
-        areas: str,
+        account_id: str,
         conversation_id: str,
         message_id: str,
+        sim_card_id: str | None = None,
     ) -> bool:
         with self._lock:
-            connection = self._connections.get(areas)
+            connection = self._connections.get(account_id)
             if connection is None or connection.closed.is_set():
                 return False
             connection.events.put(
                 encode_agent_event(
                     event_name,
-                    areas=areas,
+                    account_id=account_id,
                     conversation_id=conversation_id,
                     message_id=message_id,
+                    sim_card_id=sim_card_id,
                 )
             )
             return True
@@ -116,23 +120,26 @@ class RegistryAgentEventPublisher:
 
     def publish_inbound_message(
         self,
-        areas: str,
+        account_id: str,
         message_id: str,
         conversation_id: str,
+        sim_card_id: str | None,
     ) -> None:
         self._registry.publish(
             "inbound_message",
-            areas=areas,
+            account_id=account_id,
             message_id=message_id,
             conversation_id=conversation_id,
+            sim_card_id=sim_card_id,
         )
 
 
 class NoOpAgentEventPublisher:
     def publish_inbound_message(
         self,
-        areas: str,
+        account_id: str,
         message_id: str,
         conversation_id: str,
+        sim_card_id: str | None,
     ) -> None:
         return None

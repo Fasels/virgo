@@ -133,7 +133,7 @@ CREATE TABLE messages (
                 message_type = 'DATA_SMS'
                 AND text_content IS NULL
                 AND data_base64 IS NOT NULL
-                AND data_port IS NOT NULL
+                AND (direction = 'INBOUND' OR data_port IS NOT NULL)
             )
         ),
     CONSTRAINT chk_message_route_phones

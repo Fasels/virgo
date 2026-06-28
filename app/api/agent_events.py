@@ -9,7 +9,7 @@ from app.services.agent_event_publisher import AgentEventConnection
 
 
 class AgentEventsRegistry(Protocol):
-    def register(self, areas: str) -> AgentEventConnection: ...
+    def register(self, account_id: str) -> AgentEventConnection: ...
 
     def stream(self, connection: AgentEventConnection): ...
 
@@ -29,7 +29,7 @@ def create_agent_events_router(
     def events(
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> StreamingResponse:
-        connection = registry.register(agent.areas)
+        connection = registry.register(agent.id)
         return StreamingResponse(
             registry.stream(connection),
             media_type="text/event-stream",

@@ -22,9 +22,9 @@ class FiniteAgentRegistry:
     def __init__(self):
         self.registered = []
 
-    def register(self, areas):
+    def register(self, account_id):
         connection = object()
-        self.registered.append((areas, connection))
+        self.registered.append((account_id, connection))
         return connection
 
     def stream(self, connection):
@@ -56,7 +56,7 @@ def test_agent_events_returns_sse_headers_for_authenticated_agent():
     assert response.headers["x-accel-buffering"] == "no"
     assert response.text == ": ping agent\n\n"
     assert auth_service.tokens == ["agent-token"]
-    assert registry.registered[0][0] == "north"
+    assert registry.registered[0][0] == "acct_1"
 
 
 def test_agent_events_rejects_unknown_token_before_registration():

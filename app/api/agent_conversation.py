@@ -26,15 +26,15 @@ from app.services.message_service import (
 
 
 class AgentConversationQueryService(Protocol):
-    def list_conversations(self, agent_area: str) -> list[AgentConversationItem]: ...
+    def list_conversations(self, agent: AuthenticatedAgent) -> list[AgentConversationItem]: ...
 
     def list_messages(
         self,
         conversation_id: str,
-        agent_area: str,
+        agent: AuthenticatedAgent,
     ) -> list[AgentMessageItem]: ...
 
-    def mark_read(self, conversation_id: str, agent_area: str) -> None: ...
+    def mark_read(self, conversation_id: str, agent: AuthenticatedAgent) -> None: ...
 
     def reply(
         self,
@@ -82,7 +82,7 @@ def create_agent_conversation_router(
     def list_conversations(
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> list[AgentConversationItem]:
-        return conversation_service.list_conversations(agent.areas)
+        return conversation_service.list_conversations(agent)
 
     @router.get(
         "/conversations/{conversation_id}/messages",
@@ -93,7 +93,7 @@ def create_agent_conversation_router(
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> list[AgentMessageItem]:
         try:
-            return conversation_service.list_messages(conversation_id, agent.areas)
+            return conversation_service.list_messages(conversation_id, agent)
         except (ConversationForbidden, ConversationNotFound) as error:
             raise map_conversation_error(error) from error
 
@@ -103,7 +103,7 @@ def create_agent_conversation_router(
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> dict[str, bool]:
         try:
-            conversation_service.mark_read(conversation_id, agent.areas)
+            conversation_service.mark_read(conversation_id, agent)
         except (ConversationForbidden, ConversationNotFound) as error:
             raise map_conversation_error(error) from error
         return {"ok": True}

@@ -24,4 +24,4 @@ class AgentLoginResponse(BaseModel):
 class AgentMeResponse(BaseModel):
     id: str
     username: str
-    areas: str
+    areas: str | None

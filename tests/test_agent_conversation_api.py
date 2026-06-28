@@ -16,6 +16,17 @@ def insert_account(connection, account_id, username, password_hash, area):
         """,
         (account_id, username, password_hash, area),
     )
+    return account_id
+
+
+def bind_account_sim(connection, account_id, sim_id):
+    connection.execute(
+        """
+        INSERT INTO account_sim_cards(account_id, sim_card_id)
+        VALUES(%s, %s)
+        """,
+        (account_id, sim_id),
+    )
 
 
 def _insert_conversation_fixture(connection, clean_database, area: str):
@@ -92,7 +103,7 @@ def _insert_conversation_fixture(connection, clean_database, area: str):
             now,
         ),
     )
-    return conversation_id, message_id
+    return conversation_id, message_id, sim_id
 
 
 def _login(client: TestClient, username: str, password: str) -> str:
@@ -104,31 +115,32 @@ def _login(client: TestClient, username: str, password: str) -> str:
     return response.json()["token"]
 
 
-def test_agent_conversation_list_returns_only_matching_area(clean_database):
+def test_agent_conversation_list_returns_only_bound_sim_conversations(clean_database):
     north_user = "north_" + uuid4().hex
     south_user = "south_" + uuid4().hex
     password = "correct-password"
     with psycopg.connect(clean_database.dsn) as connection:
-        insert_account(
+        north_account = insert_account(
             connection,
             "acct_" + uuid4().hex,
             north_user,
             hash_password(password),
-            "north",
+            "same-area",
         )
         insert_account(
             connection,
             "acct_" + uuid4().hex,
             south_user,
             hash_password(password),
-            "south",
+            "same-area",
         )
-        north_conversation, _ = _insert_conversation_fixture(
-            connection, clean_database, "north"
+        north_conversation, _, north_sim = _insert_conversation_fixture(
+            connection, clean_database, "same-area"
         )
-        south_conversation, _ = _insert_conversation_fixture(
-            connection, clean_database, "south"
+        south_conversation, _, _ = _insert_conversation_fixture(
+            connection, clean_database, "same-area"
         )
+        bind_account_sim(connection, north_account, north_sim)
         connection.commit()
 
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
@@ -145,7 +157,7 @@ def test_agent_conversation_list_returns_only_matching_area(clean_database):
     assert south_conversation not in ids
 
 
-def test_agent_message_history_rejects_cross_area_access(clean_database):
+def test_agent_message_history_rejects_unbound_sim_access(clean_database):
     username = "north_" + uuid4().hex
     password = "correct-password"
     with psycopg.connect(clean_database.dsn) as connection:
@@ -154,9 +166,9 @@ def test_agent_message_history_rejects_cross_area_access(clean_database):
             "acct_" + uuid4().hex,
             username,
             hash_password(password),
-            "north",
+            "south",
         )
-        south_conversation, _ = _insert_conversation_fixture(
+        south_conversation, _, _ = _insert_conversation_fixture(
             connection, clean_database, "south"
         )
         connection.commit()
@@ -183,9 +195,14 @@ def test_agent_can_mark_matching_conversation_read(clean_database):
             hash_password(password),
             "north",
         )
-        conversation_id, _ = _insert_conversation_fixture(
+        account_id = connection.execute(
+            "SELECT id FROM accounts WHERE username = %s",
+            (username,),
+        ).fetchone()[0]
+        conversation_id, _, sim_id = _insert_conversation_fixture(
             connection, clean_database, "north"
         )
+        bind_account_sim(connection, account_id, sim_id)
         connection.commit()
 
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
@@ -211,16 +228,17 @@ def test_agent_can_reply_to_matching_conversation_route(clean_database):
     password = "correct-password"
     key = clean_database.track_message_key("agent-reply:" + uuid4().hex)
     with psycopg.connect(clean_database.dsn) as connection:
-        insert_account(
+        account_id = insert_account(
             connection,
             "acct_" + uuid4().hex,
             username,
             hash_password(password),
             "north",
         )
-        conversation_id, _ = _insert_conversation_fixture(
+        conversation_id, _, sim_id = _insert_conversation_fixture(
             connection, clean_database, "north"
         )
+        bind_account_sim(connection, account_id, sim_id)
         route = connection.execute(
             """
             SELECT external_phone_number, device_id, sim_card_id, sim_number
@@ -276,9 +294,14 @@ def test_agent_reply_requires_idempotency_key(clean_database):
             hash_password(password),
             "north",
         )
-        conversation_id, _ = _insert_conversation_fixture(
+        account_id = connection.execute(
+            "SELECT id FROM accounts WHERE username = %s",
+            (username,),
+        ).fetchone()[0]
+        conversation_id, _, sim_id = _insert_conversation_fixture(
             connection, clean_database, "north"
         )
+        bind_account_sim(connection, account_id, sim_id)
         connection.commit()
 
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))

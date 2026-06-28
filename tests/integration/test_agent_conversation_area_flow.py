@@ -111,7 +111,7 @@ def test_outbound_conversation_copies_area_from_selected_sim(clean_database):
     assert area == "north"
 
 
-def test_inbound_message_publishes_only_to_matching_agent_area(clean_database):
+def test_inbound_message_publishes_only_to_accounts_bound_to_receiving_sim(clean_database):
     marker = clean_database.track_push_token("pytest-agent-event-" + uuid4().hex)
     sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
     inbox_id = clean_database.track_message_key("agent-event:" + uuid4().hex)
@@ -133,14 +133,40 @@ def test_inbound_message_publishes_only_to_matching_agent_area(clean_database):
         ).json()
         clean_database.track(registration["id"])
         with psycopg.connect(clean_database.dsn) as connection:
+            sim_id = connection.execute(
+                "SELECT id FROM sim_cards WHERE device_id = %s AND sim_number = 1",
+                (registration["id"],),
+            ).fetchone()[0]
+            bound_account_id = "acct_" + uuid4().hex
+            unbound_account_id = "acct_" + uuid4().hex
+            connection.execute(
+                """
+                INSERT INTO accounts(id, username, password_hash, areas, status)
+                VALUES(%s, %s, 'unused', 'same-area', 'ACTIVE'),
+                      (%s, %s, 'unused', 'same-area', 'ACTIVE')
+                """,
+                (
+                    bound_account_id,
+                    "bound_" + uuid4().hex,
+                    unbound_account_id,
+                    "unbound_" + uuid4().hex,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO account_sim_cards(account_id, sim_card_id)
+                VALUES(%s, %s)
+                """,
+                (bound_account_id, sim_id),
+            )
             connection.execute(
                 "UPDATE sim_cards SET areas = %s WHERE device_id = %s AND sim_number = 1",
                 ("north", registration["id"]),
             )
             connection.commit()
 
-        north = registry.register("north")
-        south = registry.register("south")
+        bound = registry.register(bound_account_id)
+        unbound = registry.register(unbound_account_id)
         response = client.post(
             "/mobile/v1/inbox",
             headers={"Authorization": f"Bearer {registration['token']}"},
@@ -158,17 +184,18 @@ def test_inbound_message_publishes_only_to_matching_agent_area(clean_database):
         )
 
     assert response.status_code == 201
-    north_stream = registry.stream(north)
-    south_stream = registry.stream(south)
-    north_event = next(north_stream)
-    south_event = next(south_stream)
-    north_stream.close()
-    south_stream.close()
-    assert "event: inbound_message\n" in north_event
-    assert f'"conversationId":"{response.json()["conversationId"]}"' in north_event
-    assert f'"messageId":"{response.json()["id"]}"' in north_event
-    assert '"areas":"north"' in north_event
-    assert south_event.startswith(": ping ")
+    bound_stream = registry.stream(bound)
+    unbound_stream = registry.stream(unbound)
+    bound_event = next(bound_stream)
+    unbound_event = next(unbound_stream)
+    bound_stream.close()
+    unbound_stream.close()
+    assert "event: inbound_message\n" in bound_event
+    assert f'"conversationId":"{response.json()["conversationId"]}"' in bound_event
+    assert f'"messageId":"{response.json()["id"]}"' in bound_event
+    assert f'"accountId":"{bound_account_id}"' in bound_event
+    assert f'"simCardId":"{sim_id}"' in bound_event
+    assert unbound_event.startswith(": ping ")
 
 
 def test_inbound_contact_copies_area_from_receiving_sim(clean_database):
