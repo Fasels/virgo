@@ -27,6 +27,9 @@ CREATE INDEX idx_contacts_phone_number ON contacts(normalized_phone_number);
 CREATE INDEX idx_contacts_last_contact ON contacts(last_contact_at DESC);
 CREATE INDEX idx_contacts_areas ON contacts(areas);
 
+COMMENT ON COLUMN contacts.status IS
+    'NORMAL=正常，BLOCKED=拉黑，ARCHIVED=管理面板删除时归档保留历史会话';
+
 -- 会话表。
 CREATE TABLE conversations (
     id                      VARCHAR(64) PRIMARY KEY,

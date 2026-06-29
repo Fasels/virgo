@@ -43,6 +43,31 @@ class ProductUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class ContactCreate:
+    id: str
+    display_name: str | None = None
+    phone_number: str = ""
+    normalized_phone_number: str | None = None
+    avatar_url: str | None = None
+    remark: str | None = None
+    status: str = "NORMAL"
+    source: str = "MANUAL"
+    areas: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ContactUpdate:
+    display_name: str | None = None
+    phone_number: str = ""
+    normalized_phone_number: str | None = None
+    avatar_url: str | None = None
+    remark: str | None = None
+    status: str = "NORMAL"
+    source: str = "MANUAL"
+    areas: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AccountCreate:
     id: str
     username: str
@@ -235,6 +260,72 @@ class PgAdminService:
 
     def delete_product(self, product_id: str) -> None:
         self._execute("DELETE FROM products WHERE id = %s", (product_id,))
+
+    def create_contact(self, data: ContactCreate) -> None:
+        now = self._now_ms()
+        phone_number = data.phone_number.strip()
+        normalized_phone_number = (
+            _blank_to_none(data.normalized_phone_number) or phone_number
+        )
+        self._execute(
+            """
+            INSERT INTO contacts (
+                id, display_name, phone_number, normalized_phone_number,
+                avatar_url, remark, status, source, created_at, updated_at, areas
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                data.id.strip(),
+                _blank_to_none(data.display_name),
+                phone_number,
+                normalized_phone_number,
+                _blank_to_none(data.avatar_url),
+                _blank_to_none(data.remark),
+                data.status,
+                data.source,
+                now,
+                now,
+                _blank_to_none(data.areas),
+            ),
+        )
+
+    def update_contact(self, contact_id: str, data: ContactUpdate) -> None:
+        phone_number = data.phone_number.strip()
+        normalized_phone_number = (
+            _blank_to_none(data.normalized_phone_number) or phone_number
+        )
+        self._execute(
+            """
+            UPDATE contacts
+            SET display_name = %s, phone_number = %s,
+                normalized_phone_number = %s, avatar_url = %s, remark = %s,
+                status = %s, source = %s, areas = %s, updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                _blank_to_none(data.display_name),
+                phone_number,
+                normalized_phone_number,
+                _blank_to_none(data.avatar_url),
+                _blank_to_none(data.remark),
+                data.status,
+                data.source,
+                _blank_to_none(data.areas),
+                self._now_ms(),
+                contact_id,
+            ),
+        )
+
+    def archive_contact(self, contact_id: str) -> None:
+        self._execute(
+            """
+            UPDATE contacts
+            SET status = 'ARCHIVED', updated_at = %s
+            WHERE id = %s
+            """,
+            (self._now_ms(), contact_id),
+        )
 
     def unregister_device(self, device_id: str) -> None:
         unregistered_at = self._now_ms()

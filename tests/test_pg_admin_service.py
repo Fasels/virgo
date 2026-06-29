@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from pg.admin_service import (
     AccountCreate,
     AccountUpdate,
+    ContactCreate,
+    ContactUpdate,
     PgAdminService,
     ProductCreate,
     ProductUpdate,
@@ -122,6 +124,95 @@ def test_delete_product_removes_by_id():
 
     assert database.statements[0] == "DELETE FROM products WHERE id = %s"
     assert database.params[0] == ("prod_1",)
+
+
+def test_create_contact_sets_normalized_phone_and_timestamps():
+    database = RecordingDatabase()
+    service = PgAdminService(database, now_ms=lambda: 567890)
+
+    service.create_contact(
+        ContactCreate(
+            id="contact_1",
+            display_name="Alice",
+            phone_number=" +8613800000000 ",
+            normalized_phone_number="",
+            avatar_url="https://example.test/avatar.png",
+            remark="VIP",
+            status="NORMAL",
+            source="MANUAL",
+            areas="CN",
+        )
+    )
+
+    assert "INSERT INTO contacts" in database.statements[0]
+    assert database.params[0] == (
+        "contact_1",
+        "Alice",
+        "+8613800000000",
+        "+8613800000000",
+        "https://example.test/avatar.png",
+        "VIP",
+        "NORMAL",
+        "MANUAL",
+        567890,
+        567890,
+        "CN",
+    )
+
+
+def test_update_contact_changes_allowed_fields_and_refreshes_updated_at():
+    database = RecordingDatabase()
+    service = PgAdminService(database, now_ms=lambda: 678901)
+
+    service.update_contact(
+        "contact_1",
+        ContactUpdate(
+            display_name="Alice B",
+            phone_number="+8613900000000",
+            normalized_phone_number="+8613900000000",
+            avatar_url="",
+            remark="new remark",
+            status="BLOCKED",
+            source="IMPORTED",
+            areas="US",
+        ),
+    )
+
+    statement = database.statements[0]
+    changed_columns = statement.partition("SET")[2].partition("WHERE")[0]
+    updated_names = {
+        assignment.strip().split(" = ", 1)[0]
+        for assignment in changed_columns.split(",")
+    }
+    assert "UPDATE contacts" in statement
+    assert "id" not in updated_names
+    assert "created_at" not in updated_names
+    assert "last_contact_at" not in updated_names
+    assert database.params[0] == (
+        "Alice B",
+        "+8613900000000",
+        "+8613900000000",
+        None,
+        "new remark",
+        "BLOCKED",
+        "IMPORTED",
+        "US",
+        678901,
+        "contact_1",
+    )
+
+
+def test_archive_contact_marks_archived_without_deleting_history():
+    database = RecordingDatabase()
+    service = PgAdminService(database, now_ms=lambda: 789012)
+
+    service.archive_contact("contact_1")
+
+    assert database.statements[0] == (
+        "UPDATE contacts SET status = 'ARCHIVED', updated_at = %s WHERE id = %s"
+    )
+    assert database.params[0] == (789012, "contact_1")
+    assert all("DELETE" not in statement for statement in database.statements)
 
 
 def test_list_account_options_returns_product_update_by_choices():

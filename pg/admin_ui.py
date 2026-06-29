@@ -9,6 +9,8 @@ from pg.admin_service import (
     TABLES,
     AccountCreate,
     AccountUpdate,
+    ContactCreate,
+    ContactUpdate,
     PgAdminService,
     ProductCreate,
     ProductUpdate,
@@ -176,6 +178,30 @@ def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> Non
                     ),
                 ),
             ).tooltip("注销设备")
+        elif table_name == "contacts":
+            ui.button(icon="add", on_click=lambda: _open_contact_dialog(ui, service, refresh)).tooltip("新增联系人")
+            ui.button(
+                icon="edit",
+                on_click=lambda: _with_selected(
+                    ui,
+                    table,
+                    lambda row: _open_contact_dialog(ui, service, refresh, row),
+                ),
+            ).tooltip("编辑联系人")
+            ui.button(
+                icon="delete",
+                color="negative",
+                on_click=lambda: _with_selected(
+                    ui,
+                    table,
+                    lambda row: _confirm_archive_contact(
+                        ui,
+                        row["id"],
+                        lambda: service.archive_contact(row["id"]),
+                        refresh,
+                    ),
+                ),
+            ).tooltip("删除联系人（归档）")
         elif table_name == "products":
             ui.button(icon="add", on_click=lambda: _open_product_dialog(ui, service, refresh)).tooltip("新增商品")
             ui.button(
@@ -315,6 +341,76 @@ def _with_selected(ui: Any, table: Any, action: Any) -> None:
         ui.notify("请先选择一行", type="warning")
         return
     action(table.selected[0])
+
+
+def _open_contact_dialog(
+    ui: Any,
+    service: PgAdminService,
+    refresh: Any,
+    row: dict[str, Any] | None = None,
+) -> None:
+    editing = row is not None
+    with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl gap-3"):
+        ui.label("编辑联系人" if editing else "新增联系人").classes("text-base font-medium")
+        contact_id = ui.input("ID", value=(row or {}).get("id", "")).props("outlined dense").classes("w-full")
+        contact_id.set_enabled(not editing)
+        display_name = ui.input("显示名", value=(row or {}).get("display_name") or "").props("outlined dense").classes("w-full")
+        phone_number = ui.input("手机号", value=(row or {}).get("phone_number") or "").props("outlined dense").classes("w-full")
+        normalized_phone_number = ui.input("标准号码", value=(row or {}).get("normalized_phone_number") or "").props("outlined dense").classes("w-full")
+        avatar_url = ui.input("头像", value=(row or {}).get("avatar_url") or "").props("outlined dense").classes("w-full")
+        remark = ui.textarea("备注", value=(row or {}).get("remark") or "").props("outlined autogrow").classes("w-full")
+        status = ui.select(
+            ["NORMAL", "BLOCKED", "ARCHIVED"],
+            label="状态",
+            value=(row or {}).get("status", "NORMAL"),
+        ).props("outlined dense").classes("w-full")
+        source = ui.select(
+            ["MANUAL", "INBOUND_AUTO", "IMPORTED"],
+            label="来源",
+            value=(row or {}).get("source", "MANUAL"),
+        ).props("outlined dense").classes("w-full")
+        areas = ui.input("地区", value=(row or {}).get("areas") or "").props("outlined dense").classes("w-full")
+
+        def save() -> None:
+            try:
+                if editing:
+                    service.update_contact(
+                        row["id"],
+                        ContactUpdate(
+                            display_name=display_name.value,
+                            phone_number=phone_number.value,
+                            normalized_phone_number=normalized_phone_number.value,
+                            avatar_url=avatar_url.value,
+                            remark=remark.value,
+                            status=status.value,
+                            source=source.value,
+                            areas=areas.value,
+                        ),
+                    )
+                else:
+                    service.create_contact(
+                        ContactCreate(
+                            id=contact_id.value,
+                            display_name=display_name.value,
+                            phone_number=phone_number.value,
+                            normalized_phone_number=normalized_phone_number.value,
+                            avatar_url=avatar_url.value,
+                            remark=remark.value,
+                            status=status.value,
+                            source=source.value,
+                            areas=areas.value,
+                        )
+                    )
+                dialog.close()
+                refresh()
+                ui.notify("已保存", type="positive")
+            except Exception:
+                ui.notify("保存失败，请检查必填项、唯一键和数据库连接", type="negative")
+
+        with ui.row().classes("justify-end w-full gap-2"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存", icon="save", on_click=save)
+    dialog.open()
 
 
 def _open_product_dialog(
@@ -478,6 +574,32 @@ def _open_sim_dialog(
         with ui.row().classes("justify-end w-full gap-2"):
             ui.button("取消", on_click=dialog.close).props("flat")
             ui.button("保存", icon="save", on_click=save)
+    dialog.open()
+
+
+def _confirm_archive_contact(
+    ui: Any,
+    contact_id: str,
+    archive_action: Any,
+    refresh: Any,
+) -> None:
+    with ui.dialog() as dialog, ui.card().classes("gap-3"):
+        ui.label("删除联系人").classes("text-base font-medium")
+        ui.label(contact_id).classes("text-sm opacity-70")
+        ui.label("不会删除历史会话，会将联系人状态改为 ARCHIVED。").classes("text-sm")
+
+        def confirm() -> None:
+            try:
+                archive_action()
+                dialog.close()
+                refresh()
+                ui.notify("已归档", type="positive")
+            except Exception:
+                ui.notify("删除失败，请检查数据库连接", type="negative")
+
+        with ui.row().classes("justify-end w-full gap-2"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("删除", icon="delete", color="negative", on_click=confirm)
     dialog.open()
 
 
