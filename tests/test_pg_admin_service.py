@@ -215,6 +215,16 @@ def test_archive_contact_marks_archived_without_deleting_history():
     assert all("DELETE" not in statement for statement in database.statements)
 
 
+def test_list_contact_rows_excludes_archived_contacts():
+    database = RecordingDatabase()
+    service = PgAdminService(database)
+
+    service.list_rows("contacts")
+
+    assert "FROM contacts" in database.statements[0]
+    assert "status <> 'ARCHIVED'" in database.statements[0]
+
+
 def test_list_account_options_returns_product_update_by_choices():
     database = RecordingDatabase(
         rows=[
