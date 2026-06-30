@@ -51,7 +51,7 @@ def test_agent_events_returns_sse_headers_for_authenticated_agent():
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["cache-control"] == "no-cache, no-transform"
     assert response.headers["connection"] == "keep-alive"
     assert response.headers["x-accel-buffering"] == "no"
     assert response.text == ": ping agent\n\n"

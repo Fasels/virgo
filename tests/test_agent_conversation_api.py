@@ -269,7 +269,7 @@ def test_agent_can_search_conversations_by_contact_phone(clean_database):
     ]
 
 
-def test_agent_message_history_rejects_unbound_sim_access(clean_database):
+def test_agent_message_history_allows_unbound_sim_access(clean_database):
     username = "north_" + uuid4().hex
     password = "correct-password"
     with psycopg.connect(clean_database.dsn) as connection:
@@ -280,7 +280,7 @@ def test_agent_message_history_rejects_unbound_sim_access(clean_database):
             hash_password(password),
             "south",
         )
-        south_conversation, _, _ = _insert_conversation_fixture(
+        south_conversation, message_id, _ = _insert_conversation_fixture(
             connection, clean_database, "south"
         )
         connection.commit()
@@ -293,7 +293,9 @@ def test_agent_message_history_rejects_unbound_sim_access(clean_database):
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == message_id
+    assert response.json()[0]["conversationId"] == south_conversation
 
 
 def test_agent_can_mark_matching_conversation_read(clean_database):
@@ -315,6 +317,40 @@ def test_agent_can_mark_matching_conversation_read(clean_database):
             connection, clean_database, "north"
         )
         bind_account_sim(connection, account_id, sim_id)
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.patch(
+            f"/agent/v1/conversations/{conversation_id}/read",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    with psycopg.connect(clean_database.dsn) as connection:
+        unread_count = connection.execute(
+            "SELECT unread_count FROM conversations WHERE id = %s",
+            (conversation_id,),
+        ).fetchone()[0]
+    assert unread_count == 0
+
+
+def test_agent_can_mark_unbound_conversation_read(clean_database):
+    username = "north_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        conversation_id, _, _ = _insert_conversation_fixture(
+            connection, clean_database, "south"
+        )
         connection.commit()
 
     app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))

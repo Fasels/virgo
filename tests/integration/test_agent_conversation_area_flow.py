@@ -195,7 +195,10 @@ def test_inbound_message_publishes_only_to_accounts_bound_to_receiving_sim(clean
     assert f'"messageId":"{response.json()["id"]}"' in bound_event
     assert f'"accountId":"{bound_account_id}"' in bound_event
     assert f'"simCardId":"{sim_id}"' in bound_event
-    assert unbound_event.startswith(": ping ")
+    assert '"textContent":"north event"' in bound_event
+    assert '"state":"Received"' in bound_event
+    assert '"createdAt":' in bound_event
+    assert unbound_event == ": ping\n\n"
 
 
 def test_inbound_contact_copies_area_from_receiving_sim(clean_database):

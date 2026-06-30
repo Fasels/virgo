@@ -93,7 +93,7 @@ class AgentConversationService:
         conversation_id: str,
         agent: AuthenticatedAgent,
     ) -> list[AgentMessageItem]:
-        self._ensure_access(conversation_id, agent.id)
+        self._ensure_viewable_conversation(conversation_id)
         with self._database.transaction() as connection:
             rows = connection.execute(
                 """
@@ -125,7 +125,7 @@ class AgentConversationService:
         ]
 
     def mark_read(self, conversation_id: str, agent: AuthenticatedAgent) -> None:
-        self._ensure_access(conversation_id, agent.id)
+        self._ensure_viewable_conversation(conversation_id)
         now = time.time_ns() // 1_000_000
         with self._database.transaction() as connection:
             connection.execute(
@@ -134,14 +134,9 @@ class AgentConversationService:
                 SET unread_count = 0,
                     updated_at = %s
                 WHERE c.id = %s
-                  AND EXISTS (
-                      SELECT 1
-                      FROM account_sim_cards acs
-                      WHERE acs.account_id = %s
-                        AND acs.sim_card_id = c.sim_card_id
-                  )
+                  AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
                 """,
-                (now, conversation_id, agent.id),
+                (now, conversation_id),
             )
 
     def reply(
@@ -203,3 +198,17 @@ class AgentConversationService:
         if exists is not None:
             raise ConversationForbidden
         raise ConversationNotFound
+
+    def _ensure_viewable_conversation(self, conversation_id: str) -> None:
+        with self._database.transaction() as connection:
+            exists = connection.execute(
+                """
+                SELECT id
+                FROM conversations
+                WHERE id = %s
+                  AND status IN ('OPEN', 'CLOSED', 'ARCHIVED')
+                """,
+                (conversation_id,),
+            ).fetchone()
+        if exists is None:
+            raise ConversationNotFound

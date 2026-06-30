@@ -27,6 +27,9 @@ class InboundResult:
     created: bool
     areas: str | None = None
     sim_card_id: str | None = None
+    text_content: str | None = None
+    state: str = "Received"
+    created_at: int | None = None
     agent_account_ids: tuple[str, ...] = ()
 
 
@@ -106,10 +109,29 @@ class InboundMessageService:
             preview=text[:255] if text else "[Data SMS]"
             connection.execute("""UPDATE conversations SET unread_count=unread_count+1,last_message_preview=%s,last_message_direction='INBOUND',last_message_at=%s,updated_at=%s WHERE id=%s""",(preview,received,now,conversation_id))
             connection.execute("UPDATE devices SET status='online',last_seen_at=%s,updated_at=%s WHERE id=%s",(now,now,device_id))
-            result=InboundResult(message_id,conversation_id,True,area,sim_id,agent_account_ids)
+            result=InboundResult(
+                id=message_id,
+                conversation_id=conversation_id,
+                created=True,
+                areas=area,
+                sim_card_id=sim_id,
+                text_content=text,
+                state="Received",
+                created_at=now,
+                agent_account_ids=agent_account_ids,
+            )
         try: self._publisher.publish(device_id,result.id,result.conversation_id)
         except Exception: logger.exception("Inbound publisher failed for message %s",result.id)
         for account_id in result.agent_account_ids:
-            try: self._agent_publisher.publish_inbound_message(account_id,result.id,result.conversation_id,result.sim_card_id)
+            try:
+                self._agent_publisher.publish_inbound_message(
+                    account_id,
+                    result.id,
+                    result.conversation_id,
+                    result.sim_card_id,
+                    text_content=result.text_content,
+                    state=result.state,
+                    created_at=result.created_at,
+                )
             except Exception: logger.exception("Agent event publisher failed for message %s",result.id)
         return result

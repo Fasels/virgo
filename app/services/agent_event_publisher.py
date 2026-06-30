@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import json
 from queue import Empty, Queue
 from threading import Event, Lock
@@ -16,7 +15,12 @@ def encode_agent_event(
     conversation_id: str,
     message_id: str,
     sim_card_id: str | None = None,
+    text_content: str | None = None,
+    state: str = "Received",
+    created_at: int | None = None,
 ) -> str:
+    if not conversation_id or not message_id:
+        raise ValueError("conversation_id and message_id are required")
     encoded_id = json.dumps(message_id, ensure_ascii=False)[1:-1]
     data = json.dumps(
         {
@@ -24,6 +28,9 @@ def encode_agent_event(
             "messageId": message_id,
             "accountId": account_id,
             "simCardId": sim_card_id,
+            "textContent": text_content,
+            "state": state,
+            "createdAt": created_at,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -32,12 +39,7 @@ def encode_agent_event(
 
 
 def encode_heartbeat() -> str:
-    occurred_at = (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
-    return f": ping {occurred_at}\n\n"
+    return ": ping\n\n"
 
 
 @dataclass(slots=True)
@@ -83,6 +85,9 @@ class AgentEventRegistry:
         conversation_id: str,
         message_id: str,
         sim_card_id: str | None = None,
+        text_content: str | None = None,
+        state: str = "Received",
+        created_at: int | None = None,
     ) -> bool:
         with self._lock:
             connection = self._connections.get(account_id)
@@ -95,6 +100,9 @@ class AgentEventRegistry:
                     conversation_id=conversation_id,
                     message_id=message_id,
                     sim_card_id=sim_card_id,
+                    text_content=text_content,
+                    state=state,
+                    created_at=created_at,
                 )
             )
             return True
@@ -124,6 +132,9 @@ class RegistryAgentEventPublisher:
         message_id: str,
         conversation_id: str,
         sim_card_id: str | None,
+        text_content: str | None = None,
+        state: str = "Received",
+        created_at: int | None = None,
     ) -> None:
         self._registry.publish(
             "inbound_message",
@@ -131,6 +142,9 @@ class RegistryAgentEventPublisher:
             message_id=message_id,
             conversation_id=conversation_id,
             sim_card_id=sim_card_id,
+            text_content=text_content,
+            state=state,
+            created_at=created_at,
         )
 
 
@@ -141,5 +155,8 @@ class NoOpAgentEventPublisher:
         message_id: str,
         conversation_id: str,
         sim_card_id: str | None,
+        text_content: str | None = None,
+        state: str = "Received",
+        created_at: int | None = None,
     ) -> None:
         return None

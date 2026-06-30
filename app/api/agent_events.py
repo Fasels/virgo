@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.agent_auth import AgentAuthenticationService, authenticate_agent_header
@@ -27,17 +27,20 @@ def create_agent_events_router(
 
     @router.get("/events")
     def events(
+        request: Request,
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> StreamingResponse:
         connection = registry.register(agent.id)
+        headers = {
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        }
+        if request.scope.get("http_version") == "1.1":
+            headers["Connection"] = "keep-alive"
         return StreamingResponse(
             registry.stream(connection),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+            headers=headers,
         )
 
     return router
