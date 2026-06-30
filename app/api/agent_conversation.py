@@ -1,16 +1,18 @@
+import re
 from typing import Protocol
 
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 
 from app.api.device import parse_json_model
 from app.api.agent_auth import AgentAuthenticationService, authenticate_agent_header
 from app.errors import ApiError
 from app.schemas.agent_conversation import (
     AgentConversationItem,
+    AgentConversationSearchItem,
     AgentMessageItem,
     AgentReplyRequest,
 )
-from app.schemas.message import MessageCreateResponse
+from app.schemas.message import MessageCreateResponse, PHONE_SEPARATORS
 from app.services.agent_auth_service import AuthenticatedAgent
 from app.services.agent_conversation_service import (
     ConversationForbidden,
@@ -28,6 +30,12 @@ from app.services.message_service import (
 class AgentConversationQueryService(Protocol):
     def list_conversations(self, agent: AuthenticatedAgent) -> list[AgentConversationItem]: ...
 
+    def search_conversations(
+        self,
+        agent: AuthenticatedAgent,
+        phone_number: str,
+    ) -> list[AgentConversationSearchItem]: ...
+
     def list_messages(
         self,
         conversation_id: str,
@@ -43,6 +51,16 @@ class AgentConversationQueryService(Protocol):
         request: AgentReplyRequest,
         idempotency_key: str,
     ) -> MessageCreateResult: ...
+
+
+PHONE_SEARCH_PATTERN = re.compile(r"^\+?\d{1,20}$")
+
+
+def normalize_phone_search_query(value: str) -> str:
+    normalized = PHONE_SEPARATORS.sub("", value)
+    if not PHONE_SEARCH_PATTERN.fullmatch(normalized):
+        raise ValueError("phone number search query is invalid")
+    return normalized
 
 
 def create_agent_conversation_router(
@@ -83,6 +101,27 @@ def create_agent_conversation_router(
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> list[AgentConversationItem]:
         return conversation_service.list_conversations(agent)
+
+    @router.get(
+        "/conversation-search",
+        response_model=list[AgentConversationSearchItem],
+    )
+    def search_conversations(
+        phone_number: str = Query(alias="phoneNumber"),
+        agent: AuthenticatedAgent = Depends(authenticate_agent),
+    ) -> list[AgentConversationSearchItem]:
+        try:
+            phone_number_query = normalize_phone_search_query(phone_number)
+        except ValueError as error:
+            raise ApiError(
+                400,
+                "VALIDATION_ERROR",
+                "phoneNumber is invalid",
+            ) from error
+        return conversation_service.search_conversations(
+            agent,
+            phone_number_query,
+        )
 
     @router.get(
         "/conversations/{conversation_id}/messages",

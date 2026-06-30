@@ -22,7 +22,7 @@ TABLE_LABELS = {
     "devices": "设备",
     "sim_cards": "SIM 卡",
     "contacts": "联系人",
-    "products": "商品",
+    "products": "menu",
     "accounts": "账号",
 }
 
@@ -203,7 +203,7 @@ def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> Non
                 ),
             ).tooltip("删除联系人（归档）")
         elif table_name == "products":
-            ui.button(icon="add", on_click=lambda: _open_product_dialog(ui, service, refresh)).tooltip("新增商品")
+            ui.button(icon="add", on_click=lambda: _open_product_dialog(ui, service, refresh)).tooltip("新增 menu")
             ui.button(
                 icon="edit",
                 on_click=lambda: _with_selected(
@@ -211,7 +211,7 @@ def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> Non
                     table,
                     lambda row: _open_product_dialog(ui, service, refresh, row),
                 ),
-            ).tooltip("编辑商品")
+            ).tooltip("编辑 menu")
             ui.button(
                 icon="delete",
                 color="negative",
@@ -220,13 +220,13 @@ def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> Non
                     table,
                     lambda row: _confirm_delete(
                         ui,
-                        "删除商品",
+                        "删除 menu",
                         row["id"],
                         lambda: service.delete_product(row["id"]),
                         refresh,
                     ),
                 ),
-            ).tooltip("删除商品")
+            ).tooltip("删除 menu")
         elif table_name == "accounts":
             ui.button(icon="add", on_click=lambda: _open_account_dialog(ui, service, refresh)).tooltip("新增账号")
             ui.button(
@@ -421,7 +421,7 @@ def _open_product_dialog(
 ) -> None:
     editing = row is not None
     with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl gap-3"):
-        ui.label("编辑商品" if editing else "新增商品").classes("text-base font-medium")
+        ui.label("编辑 menu" if editing else "新增 menu").classes("text-base font-medium")
         product_id = ui.input("ID", value=(row or {}).get("id", "")).props("outlined dense").classes("w-full")
         product_id.set_enabled(not editing)
         menu = ui.textarea("客服提醒", value=(row or {}).get("menu") or "").props("outlined autogrow").classes("w-full")

@@ -3,6 +3,7 @@ import time
 from app.database import Database
 from app.schemas.agent_conversation import (
     AgentConversationItem,
+    AgentConversationSearchItem,
     AgentMessageItem,
     AgentReplyRequest,
 )
@@ -54,6 +55,35 @@ class AgentConversationService:
                 lastMessagePreview=row[6],
                 lastMessageDirection=row[7],
                 lastMessageAt=row[8],
+            )
+            for row in rows
+        ]
+
+    def search_conversations(
+        self,
+        agent: AuthenticatedAgent,
+        phone_number: str,
+    ) -> list[AgentConversationSearchItem]:
+        phone_number_pattern = f"%{phone_number}%"
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT ct.phone_number, ct.remark, s.phone_number, c.id
+                FROM conversations c
+                JOIN contacts ct ON ct.id = c.contact_id
+                JOIN sim_cards s ON s.id = c.sim_card_id
+                WHERE c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
+                  AND ct.normalized_phone_number LIKE %s
+                ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC, c.id
+                """,
+                (phone_number_pattern,),
+            ).fetchall()
+        return [
+            AgentConversationSearchItem(
+                contactPhoneNumber=row[0],
+                remark=row[1],
+                servicePhoneNumber=row[2],
+                conversationId=row[3],
             )
             for row in rows
         ]

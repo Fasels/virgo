@@ -3,6 +3,7 @@ from datetime import timezone
 from app.application import create_app
 from app.config import Settings
 from pg.admin_ui import (
+    TABLE_LABELS,
     _parse_sim_card_ids,
     _format_table_rows_for_display,
     _sim_card_option_labels,
@@ -106,3 +107,8 @@ def test_parse_sim_card_ids_accepts_comma_string_and_sequence():
     assert _parse_sim_card_ids(" sim_1, sim_2 ,, ") == ["sim_1", "sim_2"]
     assert _parse_sim_card_ids(["sim_2", "", "sim_3"]) == ["sim_2", "sim_3"]
     assert _parse_sim_card_ids(None) == []
+
+
+def test_admin_ui_uses_menu_wording_for_products_table():
+    assert TABLE_LABELS["products"] == "menu"
+    assert "商品" not in TABLE_LABELS.values()

@@ -24,6 +24,15 @@ class AgentConversationItem(BaseModel):
     last_message_at: int | None = Field(alias="lastMessageAt")
 
 
+class AgentConversationSearchItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    contact_phone_number: str = Field(alias="contactPhoneNumber")
+    remark: str | None
+    service_phone_number: str | None = Field(alias="servicePhoneNumber")
+    conversation_id: str = Field(alias="conversationId")
+
+
 class AgentMessageItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

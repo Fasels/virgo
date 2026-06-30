@@ -8,14 +8,46 @@ from app.config import Settings
 from app.security import hash_password
 
 
-def _insert_account(connection, username: str, password: str, area: str) -> None:
+def _insert_account(connection, username: str, password: str, area: str) -> str:
+    account_id = "acct_" + uuid4().hex
     connection.execute(
         """
         INSERT INTO accounts(id, username, password_hash, areas, status)
         VALUES(%s, %s, %s, %s, 'ACTIVE')
         """,
-        ("acct_" + uuid4().hex, username, hash_password(password), area),
+        (account_id, username, hash_password(password), area),
     )
+    return account_id
+
+
+def _insert_agent_sim_card(
+    connection,
+    clean_database,
+    phone_number: str | None,
+    carrier_name: str | None,
+    area: str | None,
+) -> str:
+    suffix = uuid4().hex
+    now = 1_800_000_000_000
+    device_id = clean_database.track(f"dev_agent_sim_{suffix}")
+    sim_id = f"sim_agent_contact_{suffix}"
+    connection.execute(
+        """
+        INSERT INTO devices(id, name, token_hash, login, enabled, status, last_seen_at)
+        VALUES(%s, %s, %s, %s, TRUE, 'online', %s)
+        """,
+        (device_id, "agent sim phone", f"token_{suffix}", f"login_{suffix}", now),
+    )
+    connection.execute(
+        """
+        INSERT INTO sim_cards(
+            id, device_id, slot_index, sim_number, phone_number, carrier_name, areas
+        )
+        VALUES(%s, %s, 0, 1, %s, %s, %s)
+        """,
+        (sim_id, device_id, phone_number, carrier_name, area),
+    )
+    return sim_id
 
 
 def _insert_contact(connection, clean_database, area: str, remark: str | None = None):
@@ -220,3 +252,90 @@ def test_agent_menu_list_returns_only_matching_non_empty_area_menus(clean_databa
             "areas": area,
         }
     ]
+
+
+def test_agent_sim_card_list_returns_only_bound_sim_cards(clean_database):
+    username = "sim_contact_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        account_id = _insert_account(connection, username, password, "north")
+        bound_a = _insert_agent_sim_card(
+            connection,
+            clean_database,
+            "+8613800000001",
+            "China Mobile",
+            "north",
+        )
+        bound_b = _insert_agent_sim_card(
+            connection,
+            clean_database,
+            "+8613800000002",
+            "China Unicom",
+            "east",
+        )
+        unbound = _insert_agent_sim_card(
+            connection,
+            clean_database,
+            "+8613800000003",
+            "China Telecom",
+            "north",
+        )
+        connection.execute(
+            """
+            INSERT INTO account_sim_cards(account_id, sim_card_id)
+            VALUES(%s, %s), (%s, %s)
+            """,
+            (account_id, bound_a, account_id, bound_b),
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.get(
+            "/agent/v1/sim-cards",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": bound_a,
+            "phoneNumber": "+8613800000001",
+            "carrierName": "China Mobile",
+            "areas": "north",
+        },
+        {
+            "id": bound_b,
+            "phoneNumber": "+8613800000002",
+            "carrierName": "China Unicom",
+            "areas": "east",
+        },
+    ]
+    assert unbound not in [item["id"] for item in response.json()]
+
+
+def test_agent_sim_card_list_returns_empty_when_no_bound_sim_cards(clean_database):
+    username = "empty_sim_contact_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        _insert_account(connection, username, password, "north")
+        _insert_agent_sim_card(
+            connection,
+            clean_database,
+            "+8613800000004",
+            "China Mobile",
+            "north",
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.get(
+            "/agent/v1/sim-cards",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == []

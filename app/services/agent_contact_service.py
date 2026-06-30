@@ -1,7 +1,7 @@
 import time
 
 from app.database import Database
-from app.schemas.agent_contact import AgentContactItem, AgentMenuItem
+from app.schemas.agent_contact import AgentContactItem, AgentMenuItem, AgentSimCardItem
 
 
 class ContactForbidden(Exception):
@@ -79,6 +79,31 @@ class AgentContactService:
                 updateTime=row[2],
                 updateBy=row[3],
                 areas=row[4],
+            )
+            for row in rows
+        ]
+
+    def list_sim_cards(self, account_id: str) -> list[AgentSimCardItem]:
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT s.id, s.phone_number, s.carrier_name, s.areas
+                FROM account_sim_cards acs
+                JOIN sim_cards s ON s.id = acs.sim_card_id
+                WHERE acs.account_id = %s
+                ORDER BY s.phone_number ASC NULLS LAST,
+                         s.device_id ASC,
+                         s.sim_number ASC,
+                         s.id ASC
+                """,
+                (account_id,),
+            ).fetchall()
+        return [
+            AgentSimCardItem(
+                id=row[0],
+                phoneNumber=row[1],
+                carrierName=row[2],
+                areas=row[3],
             )
             for row in rows
         ]

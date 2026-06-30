@@ -38,3 +38,12 @@ class AgentMenuItem(BaseModel):
     update_time: int = Field(alias="updateTime")
     update_by: str | None = Field(alias="updateBy")
     areas: str
+
+
+class AgentSimCardItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    phone_number: str | None = Field(alias="phoneNumber")
+    carrier_name: str | None = Field(alias="carrierName")
+    areas: str | None

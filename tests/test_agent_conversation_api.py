@@ -157,6 +157,118 @@ def test_agent_conversation_list_returns_only_bound_sim_conversations(clean_data
     assert south_conversation not in ids
 
 
+def test_agent_can_search_conversations_by_contact_phone(clean_database):
+    username = "search_" + uuid4().hex
+    password = "correct-password"
+    suffix = uuid4().hex
+    now = 1_800_000_000_000
+    device_id = clean_database.track(f"dev_search_{suffix}")
+    contact_phone = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    contact_id = f"contact_search_{suffix}"
+    sim_a = f"sim_search_a_{suffix}"
+    sim_b = f"sim_search_b_{suffix}"
+    sim_hidden = f"sim_search_hidden_{suffix}"
+    conversation_a = f"conv_search_a_{suffix}"
+    conversation_b = f"conv_search_b_{suffix}"
+    conversation_hidden = f"conv_search_hidden_{suffix}"
+    with psycopg.connect(clean_database.dsn) as connection:
+        account_id = insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        connection.execute(
+            """
+            INSERT INTO devices(id, name, token_hash, login, enabled, status, last_seen_at)
+            VALUES(%s, %s, %s, %s, TRUE, 'online', %s)
+            """,
+            (device_id, "agent phone", f"token_{suffix}", f"login_{suffix}", now),
+        )
+        for sim_id, sim_number, service_phone in (
+            (sim_a, 1, "+8613800000001"),
+            (sim_b, 2, "+8613800000002"),
+            (sim_hidden, 3, "+8613800000003"),
+        ):
+            connection.execute(
+                """
+                INSERT INTO sim_cards(
+                    id, device_id, slot_index, sim_number, phone_number, areas
+                )
+                VALUES(%s, %s, %s, %s, %s, 'north')
+                """,
+                (sim_id, device_id, sim_number - 1, sim_number, service_phone),
+            )
+        bind_account_sim(connection, account_id, sim_a)
+        bind_account_sim(connection, account_id, sim_b)
+        connection.execute(
+            """
+            INSERT INTO contacts(
+                id, phone_number, normalized_phone_number, remark, source, areas
+            )
+            VALUES(%s, %s, %s, %s, 'MANUAL', 'north')
+            """,
+            (contact_id, contact_phone, contact_phone, "VIP customer"),
+        )
+        for conversation_id, sim_id, sim_number in (
+            (conversation_a, sim_a, 1),
+            (conversation_b, sim_b, 2),
+            (conversation_hidden, sim_hidden, 3),
+        ):
+            connection.execute(
+                """
+                INSERT INTO conversations(
+                    id, external_phone_number, contact_id, device_id, sim_card_id,
+                    sim_number, areas, status, created_at, updated_at
+                )
+                VALUES(%s, %s, %s, %s, %s, %s, 'north', 'OPEN', %s, %s)
+                """,
+                (
+                    conversation_id,
+                    contact_phone,
+                    contact_id,
+                    device_id,
+                    sim_id,
+                    sim_number,
+                    now,
+                    now,
+                ),
+            )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.get(
+            "/agent/v1/conversation-search",
+            params={"phoneNumber": contact_phone[-6:]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "contactPhoneNumber": contact_phone,
+            "remark": "VIP customer",
+            "servicePhoneNumber": "+8613800000001",
+            "conversationId": conversation_a,
+        },
+        {
+            "contactPhoneNumber": contact_phone,
+            "remark": "VIP customer",
+            "servicePhoneNumber": "+8613800000002",
+            "conversationId": conversation_b,
+        },
+        {
+            "contactPhoneNumber": contact_phone,
+            "remark": "VIP customer",
+            "servicePhoneNumber": "+8613800000003",
+            "conversationId": conversation_hidden,
+        },
+    ]
+
+
 def test_agent_message_history_rejects_unbound_sim_access(clean_database):
     username = "north_" + uuid4().hex
     password = "correct-password"

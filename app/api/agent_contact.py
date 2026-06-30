@@ -9,6 +9,7 @@ from app.schemas.agent_contact import (
     AgentContactItem,
     AgentContactRemarkRequest,
     AgentMenuItem,
+    AgentSimCardItem,
 )
 from app.services.agent_auth_service import AuthenticatedAgent
 from app.services.agent_contact_service import ContactForbidden, ContactNotFound
@@ -25,6 +26,8 @@ class AgentContactQueryService(Protocol):
     ) -> None: ...
 
     def list_menus(self, agent_area: str) -> list[AgentMenuItem]: ...
+
+    def list_sim_cards(self, account_id: str) -> list[AgentSimCardItem]: ...
 
 
 def create_agent_contact_router(
@@ -69,5 +72,11 @@ def create_agent_contact_router(
         agent: AuthenticatedAgent = Depends(authenticate_agent),
     ) -> list[AgentMenuItem]:
         return contact_service.list_menus(agent.areas)
+
+    @router.get("/sim-cards", response_model=list[AgentSimCardItem])
+    def list_sim_cards(
+        agent: AuthenticatedAgent = Depends(authenticate_agent),
+    ) -> list[AgentSimCardItem]:
+        return contact_service.list_sim_cards(agent.id)
 
     return router
