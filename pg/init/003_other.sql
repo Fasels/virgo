@@ -52,3 +52,13 @@ CREATE TABLE products (
 
 CREATE INDEX idx_products_areas ON products(areas);
 CREATE INDEX idx_products_update_time ON products(update_time DESC);
+
+-- 地区表。账号和 SIM 卡等业务表继续保存 areas 字符串，后台管理从这里提供可选地区。
+CREATE TABLE regions (
+    id         VARCHAR(100) PRIMARY KEY,
+    created_at BIGINT NOT NULL DEFAULT ((EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT),
+    updated_at BIGINT NOT NULL DEFAULT ((EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT),
+
+    CONSTRAINT chk_region_id_not_blank
+        CHECK (BTRIM(id) <> '')
+);

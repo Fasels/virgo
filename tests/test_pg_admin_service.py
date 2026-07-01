@@ -8,9 +8,11 @@ from pg.admin_service import (
     PgAdminService,
     ProductCreate,
     ProductUpdate,
+    RegionCreate,
     SimCardUpdate,
+    TABLES,
 )
-from pg.admin_ui import _account_option_labels
+from pg.admin_ui import _account_option_labels, _region_option_labels, _table_columns
 
 
 class RecordingCursor:
@@ -76,6 +78,62 @@ def test_list_rows_rejects_unknown_table_name():
         assert str(error) == "Unsupported admin table: messages"
     else:
         raise AssertionError("unknown table name was accepted")
+
+
+def test_regions_are_available_as_admin_table_without_editable_columns():
+    assert TABLES["regions"].columns == ("id", "created_at", "updated_at")
+
+    columns = _table_columns("regions")
+
+    assert columns[0]["name"] == "id"
+    assert columns[0]["label"] == "地区"
+
+
+def test_create_region_stores_trimmed_region_name_with_timestamps():
+    database = RecordingDatabase()
+    service = PgAdminService(database, now_ms=lambda: 123456)
+
+    service.create_region(RegionCreate(id=" North "))
+
+    assert database.statements[0] == (
+        "INSERT INTO regions (id, created_at, updated_at) VALUES (%s, %s, %s)"
+    )
+    assert database.params[0] == ("North", 123456, 123456)
+
+
+def test_delete_region_removes_by_name_without_touching_existing_area_values():
+    database = RecordingDatabase()
+    service = PgAdminService(database)
+
+    service.delete_region("North")
+
+    assert database.statements[0] == "DELETE FROM regions WHERE id = %s"
+    assert database.params[0] == ("North",)
+
+
+def test_list_region_options_returns_region_names_for_area_dropdowns():
+    database = RecordingDatabase(rows=[{"id": "North"}, {"id": "South"}])
+    service = PgAdminService(database)
+
+    options = service.list_region_options()
+
+    assert options == [{"id": "North"}, {"id": "South"}]
+    assert database.statements[0] == (
+        "SELECT id FROM regions ORDER BY id ASC"
+    )
+
+
+def test_region_option_labels_keep_area_value_and_include_current_legacy_value():
+    labels = _region_option_labels(
+        [{"id": "North"}, {"id": "South"}],
+        current_value="Legacy",
+    )
+
+    assert labels == {
+        "Legacy": "Legacy",
+        "North": "North",
+        "South": "South",
+    }
 
 
 def test_create_product_sets_update_time():

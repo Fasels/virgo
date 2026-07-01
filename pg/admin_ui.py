@@ -14,6 +14,7 @@ from pg.admin_service import (
     PgAdminService,
     ProductCreate,
     ProductUpdate,
+    RegionCreate,
     SimCardUpdate,
 )
 
@@ -24,6 +25,7 @@ TABLE_LABELS = {
     "contacts": "联系人",
     "products": "menu",
     "accounts": "账号",
+    "regions": "地区",
 }
 
 FIELD_LABELS = {
@@ -261,13 +263,34 @@ def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> Non
                     lambda row: _open_sim_dialog(ui, service, refresh, row),
                 ),
             ).tooltip("编辑 SIM 卡")
+        elif table_name == "regions":
+            ui.button(icon="add", on_click=lambda: _open_region_dialog(ui, service, refresh)).tooltip("新增地区")
+            ui.button(
+                icon="delete",
+                color="negative",
+                on_click=lambda: _with_selected(
+                    ui,
+                    table,
+                    lambda row: _confirm_delete(
+                        ui,
+                        "删除地区",
+                        row["id"],
+                        lambda: service.delete_region(row["id"]),
+                        refresh,
+                    ),
+                ),
+            ).tooltip("删除地区")
 
 
 def _table_columns(table_name: str) -> list[dict[str, str]]:
     return [
         {
             "name": column,
-            "label": FIELD_LABELS.get(column, column),
+            "label": (
+                "地区"
+                if table_name == "regions" and column == "id"
+                else FIELD_LABELS.get(column, column)
+            ),
             "field": column,
             "align": "left",
         }
@@ -326,6 +349,21 @@ def _account_option_labels(options: list[dict[str, Any]]) -> dict[str, str]:
     return labels
 
 
+def _region_option_labels(
+    options: list[dict[str, Any]],
+    current_value: str | None = None,
+) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    current = current_value.strip() if isinstance(current_value, str) else ""
+    if current:
+        labels[current] = current
+    for option in options:
+        region_id = str(option["id"]).strip()
+        if region_id:
+            labels[region_id] = region_id
+    return labels
+
+
 def _parse_sim_card_ids(value: Any) -> list[str]:
     if value is None:
         return []
@@ -341,6 +379,30 @@ def _with_selected(ui: Any, table: Any, action: Any) -> None:
         ui.notify("请先选择一行", type="warning")
         return
     action(table.selected[0])
+
+
+def _open_region_dialog(
+    ui: Any,
+    service: PgAdminService,
+    refresh: Any,
+) -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl gap-3"):
+        ui.label("新增地区").classes("text-base font-medium")
+        region_id = ui.input("地区", value="").props("outlined dense").classes("w-full")
+
+        def save() -> None:
+            try:
+                service.create_region(RegionCreate(id=region_id.value))
+                dialog.close()
+                refresh()
+                ui.notify("已保存", type="positive")
+            except Exception:
+                ui.notify("保存失败，请检查地区是否为空或重复", type="negative")
+
+        with ui.row().classes("justify-end w-full gap-2"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存", icon="save", on_click=save)
+    dialog.open()
 
 
 def _open_contact_dialog(
@@ -479,7 +541,15 @@ def _open_account_dialog(
         username = ui.input("用户名", value=(row or {}).get("username", "")).props("outlined dense").classes("w-full")
         password_label = "新密码" if editing else "密码"
         password = ui.input(password_label, password=True, password_toggle_button=True).props("outlined dense").classes("w-full")
-        areas = ui.input("地区", value=(row or {}).get("areas") or "").props("outlined dense").classes("w-full")
+        areas = ui.select(
+            _region_option_labels(
+                service.list_region_options(),
+                (row or {}).get("areas"),
+            ),
+            label="地区",
+            value=(row or {}).get("areas") or None,
+            clearable=True,
+        ).props("outlined dense").classes("w-full")
         use_sims_id = ui.select(
             _sim_card_option_labels(service.list_sim_card_options()),
             label="使用 SIM",
@@ -546,7 +616,12 @@ def _open_sim_dialog(
         esim_group_id = ui.input("eSIM 分组", value=row.get("esim_group_id") or "").props("outlined dense").classes("w-full")
         enabled = ui.switch("启用", value=bool(row.get("enabled", True)))
         status = ui.select(["active", "inactive", "disabled"], label="状态", value=row.get("status", "active")).props("outlined dense").classes("w-full")
-        areas = ui.input("地区", value=row.get("areas") or "").props("outlined dense").classes("w-full")
+        areas = ui.select(
+            _region_option_labels(service.list_region_options(), row.get("areas")),
+            label="地区",
+            value=row.get("areas") or None,
+            clearable=True,
+        ).props("outlined dense").classes("w-full")
 
         def save() -> None:
             try:

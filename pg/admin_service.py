@@ -43,6 +43,11 @@ class ProductUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class RegionCreate:
+    id: str
+
+
+@dataclass(frozen=True, slots=True)
 class ContactCreate:
     id: str
     display_name: str | None = None
@@ -172,6 +177,11 @@ TABLES: dict[str, TableDefinition] = {
         columns=("id", "username", "areas", "use_sims_id", "status"),
         order_by="username ASC",
     ),
+    "regions": TableDefinition(
+        name="regions",
+        columns=("id", "created_at", "updated_at"),
+        order_by="id ASC",
+    ),
 }
 
 
@@ -228,6 +238,31 @@ class PgAdminService:
                     """
                 )
                 return [dict(row) for row in cursor.fetchall()]
+
+    def list_region_options(self) -> list[dict[str, Any]]:
+        with self._database.transaction() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM regions
+                    ORDER BY id ASC
+                    """
+                )
+                return [dict(row) for row in cursor.fetchall()]
+
+    def create_region(self, data: RegionCreate) -> None:
+        now = self._now_ms()
+        self._execute(
+            """
+            INSERT INTO regions (id, created_at, updated_at)
+            VALUES (%s, %s, %s)
+            """,
+            (data.id.strip(), now, now),
+        )
+
+    def delete_region(self, region_id: str) -> None:
+        self._execute("DELETE FROM regions WHERE id = %s", (region_id,))
 
     def create_product(self, data: ProductCreate) -> None:
         self._execute(
