@@ -37,12 +37,11 @@ class AgentConversationService:
                        c.status, c.unread_count, c.last_message_preview,
                        c.last_message_direction, c.last_message_at
                 FROM conversations c
-                JOIN account_sim_cards acs ON acs.sim_card_id = c.sim_card_id
                 WHERE c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND acs.account_id = %s
+                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
                 ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC, c.id
                 """,
-                (agent.id,),
+                (agent.areas,),
             ).fetchall()
         return [
             AgentConversationItem(
@@ -73,10 +72,11 @@ class AgentConversationService:
                 JOIN contacts ct ON ct.id = c.contact_id
                 JOIN sim_cards s ON s.id = c.sim_card_id
                 WHERE c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
+                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
                   AND ct.normalized_phone_number LIKE %s
                 ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC, c.id
                 """,
-                (phone_number_pattern,),
+                (agent.areas, phone_number_pattern),
             ).fetchall()
         return [
             AgentConversationSearchItem(
@@ -93,7 +93,7 @@ class AgentConversationService:
         conversation_id: str,
         agent: AuthenticatedAgent,
     ) -> list[AgentMessageItem]:
-        self._ensure_viewable_conversation(conversation_id)
+        self._ensure_area_access(conversation_id, agent.areas)
         with self._database.transaction() as connection:
             rows = connection.execute(
                 """
@@ -125,7 +125,7 @@ class AgentConversationService:
         ]
 
     def mark_read(self, conversation_id: str, agent: AuthenticatedAgent) -> None:
-        self._ensure_viewable_conversation(conversation_id)
+        self._ensure_area_access(conversation_id, agent.areas)
         now = time.time_ns() // 1_000_000
         with self._database.transaction() as connection:
             connection.execute(
@@ -135,8 +135,9 @@ class AgentConversationService:
                     updated_at = %s
                 WHERE c.id = %s
                   AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
+                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
                 """,
-                (now, conversation_id),
+                (now, conversation_id, agent.areas),
             )
 
     def reply(
@@ -146,7 +147,7 @@ class AgentConversationService:
         request: AgentReplyRequest,
         idempotency_key: str,
     ) -> MessageCreateResult:
-        conversation = self._load_reply_conversation(conversation_id, agent.id)
+        conversation = self._load_reply_conversation(conversation_id, agent)
         return self._message_service.create(
             MessageCreateRequest(
                 phoneNumbers=[conversation[0]],
@@ -159,30 +160,50 @@ class AgentConversationService:
             idempotency_key,
         )
 
-    def _load_reply_conversation(self, conversation_id: str, account_id: str):
-        self._ensure_access(conversation_id, account_id)
+    def _load_reply_conversation(
+        self,
+        conversation_id: str,
+        agent: AuthenticatedAgent,
+    ):
         with self._database.transaction() as connection:
-            return connection.execute(
+            conversation = connection.execute(
                 """
-                SELECT external_phone_number, device_id, sim_number
+                SELECT c.external_phone_number, c.device_id, c.sim_number
+                FROM conversations c
+                JOIN account_sim_cards acs ON acs.sim_card_id = c.sim_card_id
+                WHERE c.id = %s
+                  AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
+                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
+                  AND acs.account_id = %s
+                """,
+                (conversation_id, agent.areas, agent.id),
+            ).fetchone()
+            if conversation is not None:
+                return conversation
+            exists = connection.execute(
+                """
+                SELECT id
                 FROM conversations
                 WHERE id = %s
+                  AND status IN ('OPEN', 'CLOSED', 'ARCHIVED')
                 """,
                 (conversation_id,),
             ).fetchone()
+        if exists is not None:
+            raise ConversationForbidden
+        raise ConversationNotFound
 
-    def _ensure_access(self, conversation_id: str, account_id: str) -> None:
+    def _ensure_area_access(self, conversation_id: str, agent_area: str | None) -> None:
         with self._database.transaction() as connection:
             allowed = connection.execute(
                 """
                 SELECT c.id
                 FROM conversations c
-                JOIN account_sim_cards acs ON acs.sim_card_id = c.sim_card_id
                 WHERE c.id = %s
                   AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND acs.account_id = %s
+                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
                 """,
-                (conversation_id, account_id),
+                (conversation_id, agent_area),
             ).fetchone()
             if allowed is not None:
                 return
@@ -198,17 +219,3 @@ class AgentConversationService:
         if exists is not None:
             raise ConversationForbidden
         raise ConversationNotFound
-
-    def _ensure_viewable_conversation(self, conversation_id: str) -> None:
-        with self._database.transaction() as connection:
-            exists = connection.execute(
-                """
-                SELECT id
-                FROM conversations
-                WHERE id = %s
-                  AND status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                """,
-                (conversation_id,),
-            ).fetchone()
-        if exists is None:
-            raise ConversationNotFound

@@ -115,9 +115,8 @@ def _login(client: TestClient, username: str, password: str) -> str:
     return response.json()["token"]
 
 
-def test_agent_conversation_list_returns_only_bound_sim_conversations(clean_database):
+def test_agent_conversation_list_returns_only_same_area_conversations(clean_database):
     north_user = "north_" + uuid4().hex
-    south_user = "south_" + uuid4().hex
     password = "correct-password"
     with psycopg.connect(clean_database.dsn) as connection:
         north_account = insert_account(
@@ -125,20 +124,16 @@ def test_agent_conversation_list_returns_only_bound_sim_conversations(clean_data
             "acct_" + uuid4().hex,
             north_user,
             hash_password(password),
-            "same-area",
-        )
-        insert_account(
-            connection,
-            "acct_" + uuid4().hex,
-            south_user,
-            hash_password(password),
-            "same-area",
+            "north",
         )
         north_conversation, _, north_sim = _insert_conversation_fixture(
-            connection, clean_database, "same-area"
+            connection, clean_database, "north"
+        )
+        north_unbound_conversation, _, _ = _insert_conversation_fixture(
+            connection, clean_database, "north"
         )
         south_conversation, _, _ = _insert_conversation_fixture(
-            connection, clean_database, "same-area"
+            connection, clean_database, "south"
         )
         bind_account_sim(connection, north_account, north_sim)
         connection.commit()
@@ -153,7 +148,7 @@ def test_agent_conversation_list_returns_only_bound_sim_conversations(clean_data
 
     assert response.status_code == 200
     ids = [item["id"] for item in response.json()]
-    assert ids == [north_conversation]
+    assert set(ids) == {north_conversation, north_unbound_conversation}
     assert south_conversation not in ids
 
 
@@ -186,19 +181,19 @@ def test_agent_can_search_conversations_by_contact_phone(clean_database):
             """,
             (device_id, "agent phone", f"token_{suffix}", f"login_{suffix}", now),
         )
-        for sim_id, sim_number, service_phone in (
-            (sim_a, 1, "+8613800000001"),
-            (sim_b, 2, "+8613800000002"),
-            (sim_hidden, 3, "+8613800000003"),
+        for sim_id, sim_number, service_phone, area in (
+            (sim_a, 1, "+8613800000001", "north"),
+            (sim_b, 2, "+8613800000002", "north"),
+            (sim_hidden, 3, "+8613800000003", "east"),
         ):
             connection.execute(
                 """
                 INSERT INTO sim_cards(
                     id, device_id, slot_index, sim_number, phone_number, areas
                 )
-                VALUES(%s, %s, %s, %s, %s, 'north')
+                VALUES(%s, %s, %s, %s, %s, %s)
                 """,
-                (sim_id, device_id, sim_number - 1, sim_number, service_phone),
+                (sim_id, device_id, sim_number - 1, sim_number, service_phone, area),
             )
         bind_account_sim(connection, account_id, sim_a)
         bind_account_sim(connection, account_id, sim_b)
@@ -211,10 +206,10 @@ def test_agent_can_search_conversations_by_contact_phone(clean_database):
             """,
             (contact_id, contact_phone, contact_phone, "VIP customer"),
         )
-        for conversation_id, sim_id, sim_number in (
-            (conversation_a, sim_a, 1),
-            (conversation_b, sim_b, 2),
-            (conversation_hidden, sim_hidden, 3),
+        for conversation_id, sim_id, sim_number, area in (
+            (conversation_a, sim_a, 1, "north"),
+            (conversation_b, sim_b, 2, "north"),
+            (conversation_hidden, sim_hidden, 3, "east"),
         ):
             connection.execute(
                 """
@@ -222,7 +217,7 @@ def test_agent_can_search_conversations_by_contact_phone(clean_database):
                     id, external_phone_number, contact_id, device_id, sim_card_id,
                     sim_number, areas, status, created_at, updated_at
                 )
-                VALUES(%s, %s, %s, %s, %s, %s, 'north', 'OPEN', %s, %s)
+                VALUES(%s, %s, %s, %s, %s, %s, %s, 'OPEN', %s, %s)
                 """,
                 (
                     conversation_id,
@@ -231,6 +226,7 @@ def test_agent_can_search_conversations_by_contact_phone(clean_database):
                     device_id,
                     sim_id,
                     sim_number,
+                    area,
                     now,
                     now,
                 ),
@@ -260,16 +256,10 @@ def test_agent_can_search_conversations_by_contact_phone(clean_database):
             "servicePhoneNumber": "+8613800000002",
             "conversationId": conversation_b,
         },
-        {
-            "contactPhoneNumber": contact_phone,
-            "remark": "VIP customer",
-            "servicePhoneNumber": "+8613800000003",
-            "conversationId": conversation_hidden,
-        },
     ]
 
 
-def test_agent_message_history_allows_unbound_sim_access(clean_database):
+def test_agent_message_history_allows_same_area_unbound_sim_access(clean_database):
     username = "north_" + uuid4().hex
     password = "correct-password"
     with psycopg.connect(clean_database.dsn) as connection:
@@ -296,6 +286,33 @@ def test_agent_message_history_allows_unbound_sim_access(clean_database):
     assert response.status_code == 200
     assert response.json()[0]["id"] == message_id
     assert response.json()[0]["conversationId"] == south_conversation
+
+
+def test_agent_message_history_rejects_other_area_access(clean_database):
+    username = "north_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        south_conversation, _, _ = _insert_conversation_fixture(
+            connection, clean_database, "south"
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.get(
+            f"/agent/v1/conversations/{south_conversation}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 403
 
 
 def test_agent_can_mark_matching_conversation_read(clean_database):
@@ -337,7 +354,7 @@ def test_agent_can_mark_matching_conversation_read(clean_database):
     assert unread_count == 0
 
 
-def test_agent_can_mark_unbound_conversation_read(clean_database):
+def test_agent_rejects_marking_other_area_conversation_read(clean_database):
     username = "north_" + uuid4().hex
     password = "correct-password"
     with psycopg.connect(clean_database.dsn) as connection:
@@ -361,14 +378,13 @@ def test_agent_can_mark_unbound_conversation_read(clean_database):
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    assert response.status_code == 403
     with psycopg.connect(clean_database.dsn) as connection:
         unread_count = connection.execute(
             "SELECT unread_count FROM conversations WHERE id = %s",
             (conversation_id,),
         ).fetchone()[0]
-    assert unread_count == 0
+    assert unread_count == 3
 
 
 def test_agent_can_reply_to_matching_conversation_route(clean_database):
@@ -429,6 +445,38 @@ def test_agent_can_reply_to_matching_conversation_route(clean_database):
         route[3],
         "Pending",
     )
+
+
+def test_agent_cannot_reply_to_same_area_unbound_sim_conversation(clean_database):
+    username = "north_" + uuid4().hex
+    password = "correct-password"
+    key = clean_database.track_message_key("agent-reply:" + uuid4().hex)
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "north",
+        )
+        conversation_id, _, _ = _insert_conversation_fixture(
+            connection, clean_database, "north"
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.post(
+            f"/agent/v1/conversations/{conversation_id}/messages",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Idempotency-Key": key,
+            },
+            json={"text": "客服回复"},
+        )
+
+    assert response.status_code == 403
 
 
 def test_agent_reply_requires_idempotency_key(clean_database):
