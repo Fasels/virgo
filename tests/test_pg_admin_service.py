@@ -283,6 +283,16 @@ def test_list_contact_rows_excludes_archived_contacts():
     assert "status <> 'ARCHIVED'" in database.statements[0]
 
 
+def test_list_device_rows_excludes_unregistered_devices():
+    database = RecordingDatabase()
+    service = PgAdminService(database)
+
+    service.list_rows("devices")
+
+    assert "FROM devices" in database.statements[0]
+    assert "unregistered_at IS NULL" in database.statements[0]
+
+
 def test_list_account_options_returns_product_update_by_choices():
     database = RecordingDatabase(
         rows=[

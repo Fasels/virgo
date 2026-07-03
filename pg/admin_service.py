@@ -205,6 +205,8 @@ class PgAdminService:
             return self._list_accounts(safe_limit)
         if table_name == "contacts":
             return self._list_contacts(safe_limit)
+        if table_name == "devices":
+            return self._list_devices(safe_limit)
         columns = ", ".join(table.columns)
         statement = (
             f"SELECT {columns} FROM {table.name} "
@@ -509,6 +511,19 @@ class PgAdminService:
         statement = (
             f"SELECT {columns} FROM contacts "
             f"WHERE status <> 'ARCHIVED' "
+            f"ORDER BY {table.order_by} LIMIT %s"
+        )
+        with self._database.transaction() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(statement, (limit,))
+                return [dict(row) for row in cursor.fetchall()]
+
+    def _list_devices(self, limit: int) -> list[dict[str, Any]]:
+        table = TABLES["devices"]
+        columns = ", ".join(table.columns)
+        statement = (
+            f"SELECT {columns} FROM devices "
+            f"WHERE unregistered_at IS NULL "
             f"ORDER BY {table.order_by} LIMIT %s"
         )
         with self._database.transaction() as connection:
