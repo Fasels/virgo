@@ -23,6 +23,7 @@ from app.api.inbox import InboundCreatingService, create_inbox_router
 from app.config import Settings
 from app.database import Database
 from app.errors import install_error_handling
+from app.api.mms_webhook import MmsHandlingService, create_mms_webhook_router
 from app.services.device_auth_service import DeviceAuthService
 from app.services.device_service import DeviceService
 from app.services.agent_auth_service import AgentAuthService
@@ -41,7 +42,9 @@ from app.services.message_pull_service import MessagePullService
 from app.services.message_state_service import MessageStateService
 from app.services.inbound_message_service import InboundMessageService
 from app.services.inbound_publisher import InboundMessagePublisher, NoOpInboundMessagePublisher
+from app.services.mms_webhook_service import MmsWebhookService
 from app.services.sse import SseConnectionRegistry
+from app.services.object_storage import S3ObjectStorage
 from pg.admin_ui import mount_admin_ui
 
 
@@ -60,6 +63,7 @@ def create_app(
     agent_conversation_service: AgentConversationQueryService | None = None,
     agent_contact_service: AgentContactQueryService | None = None,
     agent_event_registry: AgentEventsRegistry | None = None,
+    mms_webhook_service: MmsHandlingService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Virgo SMS Gateway")
     install_error_handling(app)
@@ -97,6 +101,28 @@ def create_app(
         inbound_publisher or NoOpInboundMessagePublisher(),
         RegistryAgentEventPublisher(agent_registry),
     )
+    mms_service = mms_webhook_service
+    if mms_service is None:
+        import boto3
+
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint_url or None,
+            region_name=settings.s3_region,
+            aws_access_key_id=settings.s3_access_key_id or None,
+            aws_secret_access_key=settings.s3_secret_access_key or None,
+        )
+        mms_storage = S3ObjectStorage(
+            client=s3_client,
+            bucket=settings.s3_bucket,
+            public_base_url=settings.s3_public_base_url,
+        )
+        mms_service = MmsWebhookService(
+            database,
+            mms_storage,
+            inbound_publisher or NoOpInboundMessagePublisher(),
+            RegistryAgentEventPublisher(agent_registry),
+        )
     agent_auth = agent_auth_service or AgentAuthService(database)
     agent_conversations = agent_conversation_service or AgentConversationService(
         database,
@@ -120,6 +146,13 @@ def create_app(
     app.include_router(create_message_pull_router(auth_service, pull_service))
     app.include_router(create_message_status_router(auth_service, state_service))
     app.include_router(create_inbox_router(auth_service, inbound_service))
+    app.include_router(
+        create_mms_webhook_router(
+            mms_service,
+            signing_key=settings.mms_webhook_signing_key,
+            timestamp_tolerance_seconds=settings.mms_webhook_timestamp_tolerance_seconds,
+        )
+    )
     app.include_router(create_agent_auth_router(agent_auth))
     app.include_router(
         create_agent_conversation_router(agent_auth, agent_conversations)
