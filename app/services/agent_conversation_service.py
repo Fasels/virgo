@@ -39,7 +39,7 @@ class AgentConversationService:
                        c.last_message_direction, c.last_message_at
                 FROM conversations c
                 WHERE c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
+                  AND NULLIF(BTRIM(c.areas), '') IS NOT DISTINCT FROM NULLIF(BTRIM(%s), '')
                 ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC, c.id
                 """,
                 (agent.areas,),
@@ -73,7 +73,7 @@ class AgentConversationService:
                 JOIN contacts ct ON ct.id = c.contact_id
                 JOIN sim_cards s ON s.id = c.sim_card_id
                 WHERE c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
+                  AND NULLIF(BTRIM(c.areas), '') IS NOT DISTINCT FROM NULLIF(BTRIM(%s), '')
                   AND ct.normalized_phone_number LIKE %s
                 ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC, c.id
                 """,
@@ -160,7 +160,7 @@ class AgentConversationService:
                     updated_at = %s
                 WHERE c.id = %s
                   AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
+                  AND NULLIF(BTRIM(c.areas), '') IS NOT DISTINCT FROM NULLIF(BTRIM(%s), '')
                 """,
                 (now, conversation_id, agent.areas),
             )
@@ -198,7 +198,7 @@ class AgentConversationService:
                 JOIN account_sim_cards acs ON acs.sim_card_id = c.sim_card_id
                 WHERE c.id = %s
                   AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
+                  AND NULLIF(BTRIM(c.areas), '') IS NOT DISTINCT FROM NULLIF(BTRIM(%s), '')
                   AND acs.account_id = %s
                 """,
                 (conversation_id, agent.areas, agent.id),
@@ -226,7 +226,7 @@ class AgentConversationService:
                 FROM conversations c
                 WHERE c.id = %s
                   AND c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
-                  AND NULLIF(BTRIM(c.areas), '') = NULLIF(BTRIM(%s), '')
+                  AND NULLIF(BTRIM(c.areas), '') IS NOT DISTINCT FROM NULLIF(BTRIM(%s), '')
                 """,
                 (conversation_id, agent_area),
             ).fetchone()
