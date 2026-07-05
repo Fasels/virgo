@@ -10,6 +10,14 @@ class Settings:
     private_registration_token: str
     business_api_token: str = ""
     device_online_window_seconds: int = 300
+    mms_webhook_signing_key: str = ""
+    mms_webhook_timestamp_tolerance_seconds: int = 300
+    s3_endpoint_url: str = ""
+    s3_region: str = "us-east-1"
+    s3_bucket: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_public_base_url: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -48,9 +56,27 @@ class Settings:
                 "device_online_window_seconds must be a positive integer"
             )
 
+        mms_tolerance = config.get("mms_webhook_timestamp_tolerance_seconds", 300)
+        if (
+            isinstance(mms_tolerance, bool)
+            or not isinstance(mms_tolerance, int)
+            or mms_tolerance <= 0
+        ):
+            raise RuntimeError(
+                "mms_webhook_timestamp_tolerance_seconds must be a positive integer"
+            )
+
         return cls(
             database_url=database_url,
             private_registration_token=private_registration_token,
             business_api_token=business_api_token,
             device_online_window_seconds=online_window,
+            mms_webhook_signing_key=str(config.get("mms_webhook_signing_key", "") or ""),
+            mms_webhook_timestamp_tolerance_seconds=mms_tolerance,
+            s3_endpoint_url=str(config.get("s3_endpoint_url", "") or ""),
+            s3_region=str(config.get("s3_region", "us-east-1") or "us-east-1"),
+            s3_bucket=str(config.get("s3_bucket", "") or ""),
+            s3_access_key_id=str(config.get("s3_access_key_id", "") or ""),
+            s3_secret_access_key=str(config.get("s3_secret_access_key", "") or ""),
+            s3_public_base_url=str(config.get("s3_public_base_url", "") or ""),
         )
