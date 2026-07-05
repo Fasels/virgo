@@ -1,12 +1,14 @@
+import base64
 from datetime import datetime, timezone
 from uuid import uuid4
 
 import psycopg
 import pytest
 
+import app.services.mms_webhook_service as mms_webhook_service
 from app.database import Database
-from app.schemas.mms_webhook import MmsWebhookRequest
-from app.services.inbound_message_service import InboundConflict
+from app.schemas.mms_webhook import MmsAttachment, MmsWebhookRequest
+from app.services.inbound_message_service import InboundConflict, InboundValidation
 from app.services.mms_webhook_service import MmsWebhookService
 from app.services.object_storage import StoredObject
 
@@ -99,8 +101,29 @@ def bind_agent_to_sim(clean_database, sim_id):
     return account_id
 
 
-def mms_downloaded(device_id, sender, recipient, *, message_id=None, body="image hello", data="AQID"):
+def mms_downloaded(
+    device_id,
+    sender,
+    recipient,
+    *,
+    message_id=None,
+    body="image hello",
+    data="AQID",
+    sim_number=1,
+    subject="Photo",
+    attachments=None,
+):
     message_id = message_id or "mms_" + uuid4().hex
+    if attachments is None:
+        attachment = {
+            "partId": 17,
+            "contentType": "image/jpeg",
+            "name": "photo.jpg",
+            "size": 3,
+        }
+        if data is not None:
+            attachment["data"] = data
+        attachments = [attachment]
     return MmsWebhookRequest.model_validate(
         {
             "deviceId": device_id,
@@ -111,25 +134,17 @@ def mms_downloaded(device_id, sender, recipient, *, message_id=None, body="image
                 "messageId": message_id,
                 "sender": sender,
                 "recipient": recipient,
-                "simNumber": 1,
+                "simNumber": sim_number,
                 "body": body,
-                "subject": "Photo",
-                "attachments": [
-                    {
-                        "partId": 17,
-                        "contentType": "image/jpeg",
-                        "name": "photo.jpg",
-                        "size": 3,
-                        "data": data,
-                    }
-                ],
+                "subject": subject,
+                "attachments": attachments,
                 "receivedAt": datetime.now(timezone.utc).isoformat(),
             },
         }
     )
 
 
-def mms_received(device_id, sender, recipient, *, message_id):
+def mms_received(device_id, sender, recipient, *, message_id, sim_number=1, subject="Photo"):
     return MmsWebhookRequest.model_validate(
         {
             "deviceId": device_id,
@@ -140,9 +155,9 @@ def mms_received(device_id, sender, recipient, *, message_id):
                 "messageId": message_id,
                 "sender": sender,
                 "recipient": recipient,
-                "simNumber": 1,
+                "simNumber": sim_number,
                 "transactionId": "tx_" + uuid4().hex,
-                "subject": "Photo",
+                "subject": subject,
                 "size": 128,
                 "contentClass": "IMAGE_BASIC",
                 "receivedAt": datetime.now(timezone.utc).isoformat(),
@@ -242,6 +257,217 @@ def test_same_downloaded_mms_key_with_different_digest_conflicts(clean_database)
 
     with pytest.raises(InboundConflict):
         service.handle(mms_downloaded(device_id, sender, recipient, message_id=message_id, body="changed"))
+
+
+@pytest.mark.parametrize(
+    "changed_field,downloaded_overrides",
+    [
+        ("sender", {"sender": "+8613811111111"}),
+        ("recipient", {"recipient": "+8613922222222"}),
+        ("simNumber", {"sim_number": 2}),
+        ("subject", {"subject": "Other photo"}),
+    ],
+)
+def test_downloaded_after_received_conflicts_when_identity_changes(
+    clean_database,
+    changed_field,
+    downloaded_overrides,
+):
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    device_id, _, recipient = insert_device_with_sim(clean_database)
+    message_id = "mms_" + uuid4().hex
+    clean_database.track_message_key("mms:" + message_id)
+    storage = FakeStorage()
+    service = MmsWebhookService(Database(clean_database.dsn), storage)
+
+    service.handle(mms_received(device_id, sender, recipient, message_id=message_id))
+
+    downloaded_kwargs = {
+        "sender": sender,
+        "recipient": recipient,
+        "message_id": message_id,
+        **downloaded_overrides,
+    }
+    with pytest.raises(InboundConflict):
+        service.handle(mms_downloaded(device_id, **downloaded_kwargs))
+
+    assert storage.uploads == []
+
+
+def test_downloaded_mms_rejects_unsupported_attachment_type(clean_database):
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    device_id, _, recipient = insert_device_with_sim(clean_database)
+    request = mms_downloaded(
+        device_id,
+        sender,
+        recipient,
+        attachments=[
+            {
+                "partId": 17,
+                "contentType": "application/x-msdownload",
+                "name": "payload.exe",
+                "size": 3,
+                "data": "AQID",
+            }
+        ],
+    )
+    clean_database.track_message_key("mms:" + request.payload.message_id)
+    storage = FakeStorage()
+
+    with pytest.raises(mms_webhook_service.MmsUnsupportedMediaType):
+        MmsWebhookService(Database(clean_database.dsn), storage).handle(request)
+
+    assert storage.uploads == []
+
+
+def test_downloaded_mms_rejects_attachment_declared_size_over_limit(clean_database):
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    device_id, _, recipient = insert_device_with_sim(clean_database)
+    request = mms_downloaded(
+        device_id,
+        sender,
+        recipient,
+        data=None,
+        attachments=[
+            {
+                "partId": 17,
+                "contentType": "image/jpeg",
+                "name": "photo.jpg",
+                "size": 10 * 1024 * 1024 + 1,
+            }
+        ],
+    )
+    clean_database.track_message_key("mms:" + request.payload.message_id)
+    storage = FakeStorage()
+
+    with pytest.raises(mms_webhook_service.MmsPayloadTooLarge):
+        MmsWebhookService(Database(clean_database.dsn), storage).handle(request)
+
+    assert storage.uploads == []
+
+
+def test_downloaded_mms_rejects_attachment_decoded_size_over_limit(clean_database):
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    device_id, _, recipient = insert_device_with_sim(clean_database)
+    request = mms_downloaded(
+        device_id,
+        sender,
+        recipient,
+        attachments=[
+            {
+                "partId": 17,
+                "contentType": "image/jpeg",
+                "name": "photo.jpg",
+                "size": 1,
+                "data": base64.b64encode(b"\x00" * (10 * 1024 * 1024 + 1)).decode(),
+            }
+        ],
+    )
+    clean_database.track_message_key("mms:" + request.payload.message_id)
+    storage = FakeStorage()
+
+    with pytest.raises(mms_webhook_service.MmsPayloadTooLarge):
+        MmsWebhookService(Database(clean_database.dsn), storage).handle(request)
+
+    assert storage.uploads == []
+
+
+def test_downloaded_mms_rejects_invalid_attachment_base64(clean_database):
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    device_id, _, recipient = insert_device_with_sim(clean_database)
+    request = mms_downloaded(
+        device_id,
+        sender,
+        recipient,
+        attachments=[
+            {
+                "partId": 17,
+                "contentType": "image/jpeg",
+                "name": "photo.jpg",
+                "size": 3,
+                "data": "not base64",
+            }
+        ],
+    )
+    clean_database.track_message_key("mms:" + request.payload.message_id)
+    storage = FakeStorage()
+
+    with pytest.raises(InboundValidation):
+        MmsWebhookService(Database(clean_database.dsn), storage).handle(request)
+
+    assert storage.uploads == []
+
+
+def test_downloaded_mms_rejects_total_declared_size_over_limit(clean_database):
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    device_id, _, recipient = insert_device_with_sim(clean_database)
+    request = mms_downloaded(
+        device_id,
+        sender,
+        recipient,
+        attachments=[
+            {"partId": 1, "contentType": "image/jpeg", "size": 10 * 1024 * 1024},
+            {"partId": 2, "contentType": "image/png", "size": 10 * 1024 * 1024},
+            {"partId": 3, "contentType": "audio/amr", "size": 1},
+        ],
+    )
+    clean_database.track_message_key("mms:" + request.payload.message_id)
+    storage = FakeStorage()
+
+    with pytest.raises(mms_webhook_service.MmsPayloadTooLarge):
+        MmsWebhookService(Database(clean_database.dsn), storage).handle(request)
+
+    assert storage.uploads == []
+
+
+def test_downloaded_mms_rejects_total_decoded_size_over_limit_before_decoding_overflow_part(
+    clean_database,
+    monkeypatch,
+):
+    sender = clean_database.track_phone("+86" + str(uuid4().int)[:11])
+    device_id, _, recipient = insert_device_with_sim(clean_database)
+    chunk = b"\x00" * (7 * 1024 * 1024)
+    encoded_chunk = base64.b64encode(chunk).decode()
+    request = mms_downloaded(
+        device_id,
+        sender,
+        recipient,
+        attachments=[
+            {
+                "partId": 1,
+                "contentType": "image/jpeg",
+                "size": 1,
+                "data": encoded_chunk,
+            },
+            {
+                "partId": 2,
+                "contentType": "image/png",
+                "size": 1,
+                "data": encoded_chunk,
+            },
+            {
+                "partId": 3,
+                "contentType": "application/octet-stream",
+                "size": 1,
+                "data": encoded_chunk,
+            },
+        ],
+    )
+    clean_database.track_message_key("mms:" + request.payload.message_id)
+    storage = FakeStorage()
+    original_decoded_data = MmsAttachment.decoded_data
+
+    def decoded_data_spy(self):
+        if self.part_id == 3:
+            raise AssertionError("overflowing attachment should not be decoded")
+        return original_decoded_data(self)
+
+    monkeypatch.setattr(MmsAttachment, "decoded_data", decoded_data_spy)
+
+    with pytest.raises(mms_webhook_service.MmsPayloadTooLarge):
+        MmsWebhookService(Database(clean_database.dsn), storage).handle(request)
+
+    assert storage.uploads == []
 
 
 def test_received_after_downloaded_does_not_downgrade_downloaded_content(clean_database):

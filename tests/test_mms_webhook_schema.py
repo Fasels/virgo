@@ -74,6 +74,32 @@ def test_downloaded_event_accepts_image_attachment_base64():
     assert request.payload.attachments[0].decoded_data() == b"\x01\x02\x03"
 
 
+def test_downloaded_event_accepts_unsupported_attachment_type_for_service_validation():
+    request = MmsWebhookRequest.model_validate(
+        downloaded_body(
+            attachments=[
+                {
+                    "partId": 17,
+                    "contentType": "Application/X-MsDownload",
+                    "name": "payload.exe",
+                    "size": 3,
+                    "data": "AQID",
+                }
+            ]
+        )
+    )
+
+    assert request.payload.attachments[0].content_type == "application/x-msdownload"
+
+
+def test_downloaded_event_accepts_invalid_base64_for_service_validation():
+    request = MmsWebhookRequest.model_validate(
+        downloaded_body(attachments=[{"partId": 1, "contentType": "image/jpeg", "data": "not base64"}])
+    )
+
+    assert request.payload.attachments[0].data == "not base64"
+
+
 def test_received_event_uses_received_payload_even_with_downloaded_fields():
     body = received_body()
     body["payload"] = {
@@ -139,8 +165,6 @@ def test_attachment_content_changes_digest():
         received_body(payload={**received_body()["payload"], "receivedAt": "2026-07-05T12:00:00"}),
         received_body(payload={k: v for k, v in received_body()["payload"].items() if k != "transactionId"}),
         downloaded_body(attachments=[{"partId": 1, "contentType": "", "data": "AQID"}]),
-        downloaded_body(attachments=[{"partId": 1, "contentType": "image/jpeg", "data": "not base64"}]),
-        downloaded_body(attachments=[{"partId": 1, "contentType": "application/x-msdownload", "data": "AQID"}]),
     ],
 )
 def test_invalid_payloads_are_rejected(body):

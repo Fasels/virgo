@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import base64
 import logging
+import re
 import secrets
 import time
 
@@ -24,6 +26,25 @@ from app.services.object_storage import build_mms_object_key
 
 
 logger = logging.getLogger(__name__)
+
+
+ALLOWED_MMS_ATTACHMENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "audio/amr",
+    "application/octet-stream",
+}
+MAX_MMS_ATTACHMENT_BYTES = 10 * 1024 * 1024
+MAX_MMS_TOTAL_BYTES = 20 * 1024 * 1024
+STANDARD_BASE64 = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
+
+
+class MmsPayloadTooLarge(Exception):
+    pass
+
+
+class MmsUnsupportedMediaType(Exception):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +74,9 @@ class MmsWebhookService:
         if received > now + 300_000:
             raise InboundValidation
 
+        self._validate_attachments(request)
         digest = mms_webhook_digest(request)
+        identity = self._mms_identity(request)
         payload = request.payload
         idempotency_key = f"mms:{payload.message_id}"
         agent_account_ids: tuple[str, ...] = ()
@@ -73,7 +96,8 @@ class MmsWebhookService:
 
             existing = connection.execute(
                 """
-                SELECT id, conversation_id, sim_card_id, metadata
+                SELECT id, conversation_id, sim_card_id, metadata,
+                       from_phone_number, to_phone_number, sim_number
                 FROM messages
                 WHERE device_id=%s AND direction='INBOUND' AND idempotency_key=%s
                 LIMIT 1
@@ -85,6 +109,8 @@ class MmsWebhookService:
                 conversation_id = existing[1]
                 sim_id = existing[2]
                 metadata = existing[3] or {}
+                if self._stored_identity(metadata, request, existing) != identity:
+                    raise InboundConflict
                 digest_key = self._digest_key(request)
                 if metadata.get(digest_key) == digest:
                     return MmsWebhookResult(message_id, conversation_id, payload.message_id, False)
@@ -114,6 +140,7 @@ class MmsWebhookService:
                         "webhookId": request.webhook_id,
                         "webhookEventId": request.id,
                     },
+                    "mmsIdentity": identity,
                     "simNumber": payload.sim_number,
                     "recipient": payload.recipient,
                 }
@@ -247,6 +274,52 @@ class MmsWebhookService:
                 ),
             )
 
+    def _validate_attachments(self, request: MmsWebhookRequest) -> None:
+        payload = request.payload
+        if not isinstance(payload, MmsDownloadedPayload):
+            return
+
+        declared_total = 0
+        decoded_total = 0
+        for attachment in payload.attachments:
+            if attachment.content_type not in ALLOWED_MMS_ATTACHMENT_TYPES:
+                raise MmsUnsupportedMediaType
+
+            if attachment.size is not None:
+                if attachment.size > MAX_MMS_ATTACHMENT_BYTES:
+                    raise MmsPayloadTooLarge
+                next_declared_total = declared_total + attachment.size
+                if next_declared_total > MAX_MMS_TOTAL_BYTES:
+                    raise MmsPayloadTooLarge
+                declared_total = next_declared_total
+
+            if attachment.data is None:
+                decoded_size = attachment.size or 0
+                if decoded_total + decoded_size > MAX_MMS_TOTAL_BYTES:
+                    raise MmsPayloadTooLarge
+            else:
+                estimated_size = self._estimated_base64_decoded_size(attachment.data)
+                if estimated_size > MAX_MMS_ATTACHMENT_BYTES:
+                    raise MmsPayloadTooLarge
+                if decoded_total + estimated_size > MAX_MMS_TOTAL_BYTES:
+                    raise MmsPayloadTooLarge
+                try:
+                    data = attachment.decoded_data()
+                except (ValueError, base64.binascii.Error) as error:
+                    raise InboundValidation from error
+                decoded_size = len(data)
+                if decoded_size > MAX_MMS_ATTACHMENT_BYTES:
+                    raise MmsPayloadTooLarge
+                if decoded_total + decoded_size > MAX_MMS_TOTAL_BYTES:
+                    raise MmsPayloadTooLarge
+            decoded_total += decoded_size
+
+    def _estimated_base64_decoded_size(self, data: str) -> int:
+        if len(data) % 4 != 0 or STANDARD_BASE64.fullmatch(data) is None:
+            raise InboundValidation
+        padding = 2 if data.endswith("==") else 1 if data.endswith("=") else 0
+        return (len(data) // 4) * 3 - padding
+
     def _publish(
         self,
         device_id: str,
@@ -378,6 +451,7 @@ class MmsWebhookService:
     def _merge_metadata(self, metadata, request: MmsWebhookRequest, digest: str) -> dict:
         payload = request.payload
         merged = dict(metadata or {})
+        merged["mmsIdentity"] = self._mms_identity(request)
         merged["mms"] = {
             **dict(merged.get("mms") or {}),
             "messageId": payload.message_id,
@@ -391,6 +465,31 @@ class MmsWebhookService:
 
     def _digest_key(self, request: MmsWebhookRequest) -> str:
         return "downloadedDigest" if request.event == "mms:downloaded" else "receivedDigest"
+
+    def _mms_identity(self, request: MmsWebhookRequest) -> dict:
+        payload = request.payload
+        return {
+            "deviceId": request.device_id,
+            "messageId": payload.message_id,
+            "sender": payload.sender,
+            "recipient": payload.recipient,
+            "simNumber": payload.sim_number,
+            "subject": payload.subject,
+        }
+
+    def _stored_identity(self, metadata, request: MmsWebhookRequest, existing) -> dict:
+        stored = (metadata or {}).get("mmsIdentity")
+        if isinstance(stored, dict):
+            return stored
+        mms_metadata = dict((metadata or {}).get("mms") or {})
+        return {
+            "deviceId": request.device_id,
+            "messageId": mms_metadata.get("messageId") or request.payload.message_id,
+            "sender": existing[4],
+            "recipient": (metadata or {}).get("recipient", existing[5]),
+            "simNumber": (metadata or {}).get("simNumber", existing[6]),
+            "subject": mms_metadata.get("subject"),
+        }
 
     def _preview(self, request: MmsWebhookRequest) -> str:
         payload = request.payload

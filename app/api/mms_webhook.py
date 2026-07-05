@@ -11,7 +11,11 @@ from app.services.inbound_message_service import (
     InboundValidation,
 )
 from app.services.mms_signature import InvalidMmsSignature, verify_mms_signature
-from app.services.mms_webhook_service import MmsWebhookResult
+from app.services.mms_webhook_service import (
+    MmsPayloadTooLarge,
+    MmsUnsupportedMediaType,
+    MmsWebhookResult,
+)
 
 
 class MmsHandlingService(Protocol):
@@ -72,6 +76,18 @@ def create_mms_webhook_router(
                 400,
                 "VALIDATION_ERROR",
                 "MMS webhook is invalid",
+            ) from error
+        except MmsPayloadTooLarge as error:
+            raise ApiError(
+                413,
+                "PAYLOAD_TOO_LARGE",
+                "MMS attachment payload is too large",
+            ) from error
+        except MmsUnsupportedMediaType as error:
+            raise ApiError(
+                415,
+                "UNSUPPORTED_MEDIA_TYPE",
+                "MMS attachment content type is unsupported",
             ) from error
         return {
             "ok": True,

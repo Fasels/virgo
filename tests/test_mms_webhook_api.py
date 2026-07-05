@@ -5,6 +5,7 @@ import time
 
 from fastapi.testclient import TestClient
 
+import app.services.mms_webhook_service as mms_webhook_service
 from app.application import create_app
 from app.config import Settings
 from app.services.inbound_message_service import (
@@ -44,6 +45,30 @@ def body():
             "receivedAt": "2026-07-05T08:00:00Z",
         },
     }
+
+
+def downloaded_body():
+    request_body = body()
+    request_body["event"] = "mms:downloaded"
+    request_body["payload"] = {
+        "messageId": "mms_1",
+        "sender": "+8613800138000",
+        "recipient": None,
+        "simNumber": 1,
+        "body": "hello image",
+        "subject": "Photo",
+        "attachments": [
+            {
+                "partId": 17,
+                "contentType": "image/jpeg",
+                "name": "photo.jpg",
+                "size": 3,
+                "data": "not base64",
+            }
+        ],
+        "receivedAt": "2026-07-05T08:00:00Z",
+    }
+    return request_body
 
 
 def client(service, signing_key=""):
@@ -119,6 +144,38 @@ def test_mms_webhook_maps_validation_error():
 
     assert response.status_code == 400
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_mms_webhook_maps_invalid_attachment_base64_after_schema_accepts_it():
+    service = Service(error=InboundValidation())
+    response = client(service).post(
+        "/api/v1/webhooks/android-sms-gateway/mms",
+        json=downloaded_body(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert len(service.calls) == 1
+
+
+def test_mms_webhook_maps_payload_too_large():
+    response = client(Service(error=mms_webhook_service.MmsPayloadTooLarge())).post(
+        "/api/v1/webhooks/android-sms-gateway/mms",
+        json=body(),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["code"] == "PAYLOAD_TOO_LARGE"
+
+
+def test_mms_webhook_maps_unsupported_media_type():
+    response = client(Service(error=mms_webhook_service.MmsUnsupportedMediaType())).post(
+        "/api/v1/webhooks/android-sms-gateway/mms",
+        json=body(),
+    )
+
+    assert response.status_code == 415
+    assert response.json()["code"] == "UNSUPPORTED_MEDIA_TYPE"
 
 
 def test_mms_webhook_schema_validation_error_does_not_call_service():

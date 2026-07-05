@@ -18,12 +18,6 @@ from app.schemas.message import normalize_phone
 
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-ALLOWED_ATTACHMENT_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "audio/amr",
-    "application/octet-stream",
-}
 
 
 class MmsAttachment(BaseModel):
@@ -38,21 +32,7 @@ class MmsAttachment(BaseModel):
     @field_validator("content_type")
     @classmethod
     def validate_content_type(cls, value: str) -> str:
-        normalized = value.strip().lower()
-        if normalized not in ALLOWED_ATTACHMENT_TYPES:
-            raise ValueError("attachment contentType is unsupported")
-        return normalized
-
-    @field_validator("data")
-    @classmethod
-    def validate_data(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        try:
-            base64.b64decode(value, validate=True)
-        except (ValueError, base64.binascii.Error) as error:
-            raise ValueError("attachment data must be standard Base64") from error
-        return value
+        return value.strip().lower()
 
     def decoded_data(self) -> bytes | None:
         if self.data is None:
