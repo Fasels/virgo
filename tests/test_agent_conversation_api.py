@@ -286,6 +286,112 @@ def test_agent_message_history_allows_same_area_unbound_sim_access(clean_databas
     assert response.status_code == 200
     assert response.json()[0]["id"] == message_id
     assert response.json()[0]["conversationId"] == south_conversation
+    assert response.json()[0]["attachments"] == []
+
+
+def test_agent_message_item_includes_attachments():
+    from app.schemas.agent_conversation import AgentMessageAttachment, AgentMessageItem
+
+    item = AgentMessageItem(
+        id="msg_1",
+        conversationId="conv_1",
+        direction="INBOUND",
+        messageType="MMS",
+        textContent="hello",
+        state="Received",
+        fromPhoneNumber="+8613800138000",
+        toPhoneNumber=None,
+        createdAt=1,
+        receivedAt=1,
+        sentAt=None,
+        deliveredAt=None,
+        attachments=[
+            AgentMessageAttachment(
+                id="att_1",
+                partId=17,
+                contentType="image/jpeg",
+                name="photo.jpg",
+                size=3,
+                url="https://cdn.example.test/photo.jpg",
+            )
+        ],
+    )
+
+    assert item.model_dump(by_alias=True)["attachments"][0]["partId"] == 17
+
+
+def test_agent_message_history_includes_ordered_attachments(clean_database):
+    username = "mms_" + uuid4().hex
+    password = "correct-password"
+    with psycopg.connect(clean_database.dsn) as connection:
+        insert_account(
+            connection,
+            "acct_" + uuid4().hex,
+            username,
+            hash_password(password),
+            "south",
+        )
+        conversation_id, message_id, _ = _insert_conversation_fixture(
+            connection, clean_database, "south"
+        )
+        connection.execute(
+            """
+            UPDATE messages
+            SET message_type = 'MMS', text_content = 'hello image'
+            WHERE id = %s
+            """,
+            (message_id,),
+        )
+        first_attachment_id = "att_" + uuid4().hex
+        second_attachment_id = "att_" + uuid4().hex
+        connection.execute(
+            """
+            INSERT INTO message_attachments(
+                id, message_id, part_id, content_type, name, size, s3_bucket, s3_key, url
+            )
+            VALUES
+                (%s, %s, 17, 'image/jpeg', 'photo.jpg', 3, 'bucket', 'mms/photo.jpg', %s),
+                (%s, %s, 2, 'image/png', NULL, NULL, 'bucket', 'mms/preview.png', %s)
+            """,
+            (
+                first_attachment_id,
+                message_id,
+                "https://cdn.example.test/photo.jpg",
+                second_attachment_id,
+                message_id,
+                "https://cdn.example.test/preview.png",
+            ),
+        )
+        connection.commit()
+
+    app = create_app(Settings(clean_database.dsn, "registration-secret", "business-secret"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        token = _login(client, username, password)
+        response = client.get(
+            f"/agent/v1/conversations/{conversation_id}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()[0]["messageType"] == "MMS"
+    assert response.json()[0]["attachments"] == [
+        {
+            "id": second_attachment_id,
+            "partId": 2,
+            "contentType": "image/png",
+            "name": None,
+            "size": None,
+            "url": "https://cdn.example.test/preview.png",
+        },
+        {
+            "id": first_attachment_id,
+            "partId": 17,
+            "contentType": "image/jpeg",
+            "name": "photo.jpg",
+            "size": 3,
+            "url": "https://cdn.example.test/photo.jpg",
+        },
+    ]
 
 
 def test_agent_message_history_rejects_other_area_access(clean_database):

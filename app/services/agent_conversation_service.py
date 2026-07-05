@@ -4,6 +4,7 @@ from app.database import Database
 from app.schemas.agent_conversation import (
     AgentConversationItem,
     AgentConversationSearchItem,
+    AgentMessageAttachment,
     AgentMessageItem,
     AgentReplyRequest,
 )
@@ -106,6 +107,29 @@ class AgentConversationService:
                 """,
                 (conversation_id,),
             ).fetchall()
+            message_ids = [row[0] for row in rows]
+            attachments_by_message = {message_id: [] for message_id in message_ids}
+            if message_ids:
+                attachment_rows = connection.execute(
+                    """
+                    SELECT message_id, id, part_id, content_type, name, size, url
+                    FROM message_attachments
+                    WHERE message_id = ANY(%s::varchar[])
+                    ORDER BY message_id, part_id
+                    """,
+                    (message_ids,),
+                ).fetchall()
+                for attachment in attachment_rows:
+                    attachments_by_message[attachment[0]].append(
+                        AgentMessageAttachment(
+                            id=attachment[1],
+                            partId=attachment[2],
+                            contentType=attachment[3],
+                            name=attachment[4],
+                            size=attachment[5],
+                            url=attachment[6],
+                        )
+                    )
         return [
             AgentMessageItem(
                 id=row[0],
@@ -120,6 +144,7 @@ class AgentConversationService:
                 receivedAt=row[9],
                 sentAt=row[10],
                 deliveredAt=row[11],
+                attachments=attachments_by_message.get(row[0], []),
             )
             for row in rows
         ]

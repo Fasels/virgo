@@ -33,6 +33,17 @@ class AgentConversationSearchItem(BaseModel):
     conversation_id: str = Field(alias="conversationId")
 
 
+class AgentMessageAttachment(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    part_id: int = Field(alias="partId")
+    content_type: str = Field(alias="contentType")
+    name: str | None
+    size: int | None
+    url: str | None
+
+
 class AgentMessageItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -48,6 +59,7 @@ class AgentMessageItem(BaseModel):
     received_at: int | None = Field(alias="receivedAt")
     sent_at: int | None = Field(alias="sentAt")
     delivered_at: int | None = Field(alias="deliveredAt")
+    attachments: list[AgentMessageAttachment] = Field(default_factory=list)
 
 
 class AgentReplyRequest(BaseModel):
