@@ -107,7 +107,7 @@ CREATE TABLE messages (
     CONSTRAINT chk_message_direction
         CHECK (direction IN ('OUTBOUND', 'INBOUND')),
     CONSTRAINT chk_message_type
-        CHECK (message_type IN ('SMS', 'DATA_SMS')),
+        CHECK (message_type IN ('SMS', 'DATA_SMS', 'MMS')),
     CONSTRAINT chk_message_state
         CHECK (state IN (
             'Pending',
@@ -138,6 +138,13 @@ CREATE TABLE messages (
                 AND data_base64 IS NOT NULL
                 AND (direction = 'INBOUND' OR data_port IS NOT NULL)
             )
+            OR
+            (
+                message_type = 'MMS'
+                AND direction = 'INBOUND'
+                AND data_base64 IS NULL
+                AND data_port IS NULL
+            )
         ),
     CONSTRAINT chk_message_route_phones
         CHECK (
@@ -154,6 +161,33 @@ CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at D
 CREATE INDEX idx_messages_device_state ON messages(device_id, state);
 CREATE INDEX idx_messages_state ON messages(state);
 CREATE INDEX idx_messages_pull_queue ON messages(device_id, state, created_at);
+
+CREATE TABLE message_attachments (
+    id           VARCHAR(64) PRIMARY KEY,
+    message_id   VARCHAR(64) NOT NULL
+                 REFERENCES messages(id) ON DELETE CASCADE,
+    part_id      INTEGER NOT NULL,
+    content_type VARCHAR(100) NOT NULL,
+    name         VARCHAR(255),
+    size         BIGINT,
+    s3_bucket    VARCHAR(255) NOT NULL,
+    s3_key       TEXT NOT NULL,
+    url          TEXT,
+    etag         VARCHAR(255),
+    metadata     JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at   BIGINT NOT NULL DEFAULT ((EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT),
+    updated_at   BIGINT NOT NULL DEFAULT ((EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT),
+
+    CONSTRAINT chk_message_attachment_part_id
+        CHECK (part_id >= 0),
+    CONSTRAINT chk_message_attachment_size
+        CHECK (size IS NULL OR size >= 0),
+    CONSTRAINT uq_message_attachment_part
+        UNIQUE (message_id, part_id)
+);
+
+CREATE INDEX idx_message_attachments_message
+    ON message_attachments(message_id, part_id);
 
 -- 每个接收号码的独立状态，兼容 Android recipients 数组。
 CREATE TABLE message_recipients (
