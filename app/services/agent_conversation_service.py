@@ -36,8 +36,10 @@ class AgentConversationService:
                 """
                 SELECT c.id, c.external_phone_number, c.contact_id, c.areas,
                        c.status, c.unread_count, c.last_message_preview,
-                       c.last_message_direction, c.last_message_at
+                       c.last_message_direction, c.last_message_at,
+                       s.phone_number
                 FROM conversations c
+                LEFT JOIN sim_cards s ON s.id = c.sim_card_id
                 WHERE c.status IN ('OPEN', 'CLOSED', 'ARCHIVED')
                   AND NULLIF(BTRIM(c.areas), '') IS NOT DISTINCT FROM NULLIF(BTRIM(%s), '')
                 ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC, c.id
@@ -55,6 +57,7 @@ class AgentConversationService:
                 lastMessagePreview=row[6],
                 lastMessageDirection=row[7],
                 lastMessageAt=row[8],
+                servicePhoneNumber=row[9],
             )
             for row in rows
         ]
@@ -98,12 +101,17 @@ class AgentConversationService:
         with self._database.transaction() as connection:
             rows = connection.execute(
                 """
-                SELECT id, conversation_id, direction, message_type, text_content,
-                       state, from_phone_number, to_phone_number, created_at,
-                       received_at, sent_at, delivered_at
-                FROM messages
-                WHERE conversation_id = %s
-                ORDER BY created_at ASC, id ASC
+                SELECT m.id, m.conversation_id, m.direction, m.message_type,
+                       m.text_content, m.state, m.from_phone_number,
+                       m.to_phone_number, m.created_at, m.received_at,
+                       m.sent_at, m.delivered_at,
+                       COALESCE(s.phone_number, c.sim_card_id),
+                       s.esim_profile_name
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                LEFT JOIN sim_cards s ON s.id = c.sim_card_id
+                WHERE m.conversation_id = %s
+                ORDER BY m.created_at ASC, m.id ASC
                 """,
                 (conversation_id,),
             ).fetchall()
@@ -144,6 +152,8 @@ class AgentConversationService:
                 receivedAt=row[9],
                 sentAt=row[10],
                 deliveredAt=row[11],
+                customerSimCard=row[12],
+                customerRemark=row[13],
                 attachments=attachments_by_message.get(row[0], []),
             )
             for row in rows

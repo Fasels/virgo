@@ -129,11 +129,23 @@ def test_agent_conversation_list_returns_only_same_area_conversations(clean_data
         north_conversation, _, north_sim = _insert_conversation_fixture(
             connection, clean_database, "north"
         )
-        north_unbound_conversation, _, _ = _insert_conversation_fixture(
+        north_unbound_conversation, _, north_unbound_sim = _insert_conversation_fixture(
             connection, clean_database, "north"
         )
         south_conversation, _, _ = _insert_conversation_fixture(
             connection, clean_database, "south"
+        )
+        connection.execute(
+            """
+            UPDATE sim_cards
+            SET phone_number = CASE id
+                WHEN %s THEN '+8613800000101'
+                WHEN %s THEN '+8613800000102'
+                ELSE phone_number
+            END
+            WHERE id IN (%s, %s)
+            """,
+            (north_sim, north_unbound_sim, north_sim, north_unbound_sim),
         )
         bind_account_sim(connection, north_account, north_sim)
         connection.commit()
@@ -150,6 +162,11 @@ def test_agent_conversation_list_returns_only_same_area_conversations(clean_data
     ids = [item["id"] for item in response.json()]
     assert set(ids) == {north_conversation, north_unbound_conversation}
     assert south_conversation not in ids
+    service_phone_by_conversation = {
+        item["id"]: item["servicePhoneNumber"] for item in response.json()
+    }
+    assert service_phone_by_conversation[north_conversation] == "+8613800000101"
+    assert service_phone_by_conversation[north_unbound_conversation] == "+8613800000102"
 
 
 def test_agent_can_search_conversations_by_contact_phone(clean_database):
@@ -270,8 +287,16 @@ def test_agent_message_history_allows_same_area_unbound_sim_access(clean_databas
             hash_password(password),
             "south",
         )
-        south_conversation, message_id, _ = _insert_conversation_fixture(
+        south_conversation, message_id, south_sim = _insert_conversation_fixture(
             connection, clean_database, "south"
+        )
+        connection.execute(
+            """
+            UPDATE sim_cards
+            SET phone_number = %s, esim_profile_name = %s
+            WHERE id = %s
+            """,
+            ("+8613800000099", "south support line", south_sim),
         )
         connection.commit()
 
@@ -286,6 +311,8 @@ def test_agent_message_history_allows_same_area_unbound_sim_access(clean_databas
     assert response.status_code == 200
     assert response.json()[0]["id"] == message_id
     assert response.json()[0]["conversationId"] == south_conversation
+    assert response.json()[0]["customerSimCard"] == "+8613800000099"
+    assert response.json()[0]["customerRemark"] == "south support line"
     assert response.json()[0]["attachments"] == []
 
 

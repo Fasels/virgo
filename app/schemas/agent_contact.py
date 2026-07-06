@@ -47,3 +47,4 @@ class AgentSimCardItem(BaseModel):
     phone_number: str | None = Field(alias="phoneNumber")
     carrier_name: str | None = Field(alias="carrierName")
     areas: str | None
+    customer_remark: str | None = Field(alias="customerRemark")

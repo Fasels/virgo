@@ -87,7 +87,8 @@ class AgentContactService:
         with self._database.transaction() as connection:
             rows = connection.execute(
                 """
-                SELECT s.id, s.phone_number, s.carrier_name, s.areas
+                SELECT s.id, s.phone_number, s.carrier_name, s.areas,
+                       s.esim_profile_name
                 FROM account_sim_cards acs
                 JOIN sim_cards s ON s.id = acs.sim_card_id
                 WHERE acs.account_id = %s
@@ -104,6 +105,7 @@ class AgentContactService:
                 phoneNumber=row[1],
                 carrierName=row[2],
                 areas=row[3],
+                customerRemark=row[4],
             )
             for row in rows
         ]

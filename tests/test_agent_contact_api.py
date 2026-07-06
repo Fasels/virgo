@@ -26,6 +26,7 @@ def _insert_agent_sim_card(
     phone_number: str | None,
     carrier_name: str | None,
     area: str | None,
+    customer_remark: str | None = None,
 ) -> str:
     suffix = uuid4().hex
     now = 1_800_000_000_000
@@ -41,11 +42,12 @@ def _insert_agent_sim_card(
     connection.execute(
         """
         INSERT INTO sim_cards(
-            id, device_id, slot_index, sim_number, phone_number, carrier_name, areas
+            id, device_id, slot_index, sim_number, phone_number, carrier_name,
+            areas, esim_profile_name
         )
-        VALUES(%s, %s, 0, 1, %s, %s, %s)
+        VALUES(%s, %s, 0, 1, %s, %s, %s, %s)
         """,
-        (sim_id, device_id, phone_number, carrier_name, area),
+        (sim_id, device_id, phone_number, carrier_name, area, customer_remark),
     )
     return sim_id
 
@@ -265,6 +267,7 @@ def test_agent_sim_card_list_returns_only_bound_sim_cards(clean_database):
             "+8613800000001",
             "China Mobile",
             "north",
+            "客服 A 专用",
         )
         bound_b = _insert_agent_sim_card(
             connection,
@@ -304,12 +307,14 @@ def test_agent_sim_card_list_returns_only_bound_sim_cards(clean_database):
             "phoneNumber": "+8613800000001",
             "carrierName": "China Mobile",
             "areas": "north",
+            "customerRemark": "客服 A 专用",
         },
         {
             "id": bound_b,
             "phoneNumber": "+8613800000002",
             "carrierName": "China Unicom",
             "areas": "east",
+            "customerRemark": None,
         },
     ]
     assert unbound not in [item["id"] for item in response.json()]

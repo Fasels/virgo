@@ -15,6 +15,7 @@ class AgentConversationItem(BaseModel):
 
     id: str
     external_phone_number: str = Field(alias="externalPhoneNumber")
+    service_phone_number: str | None = Field(alias="servicePhoneNumber")
     contact_id: str = Field(alias="contactId")
     areas: str
     status: str
@@ -59,6 +60,8 @@ class AgentMessageItem(BaseModel):
     received_at: int | None = Field(alias="receivedAt")
     sent_at: int | None = Field(alias="sentAt")
     delivered_at: int | None = Field(alias="deliveredAt")
+    customer_sim_card: str | None = Field(default=None, alias="customerSimCard")
+    customer_remark: str | None = Field(default=None, alias="customerRemark")
     attachments: list[AgentMessageAttachment] = Field(default_factory=list)
 
 

@@ -50,7 +50,7 @@ FIELD_LABELS = {
     "phone_number": "手机号",
     "carrier_name": "运营商",
     "iccid_hash": "ICCID Hash",
-    "esim_profile_name": "eSIM 名称",
+    "esim_profile_name": "客服备注",
     "esim_group_id": "eSIM 分组",
     "last_used_at": "最近使用",
     "areas": "地区",
@@ -612,7 +612,7 @@ def _open_sim_dialog(
         phone_number = ui.input("手机号", value=row.get("phone_number") or "").props("outlined dense").classes("w-full")
         carrier_name = ui.input("运营商", value=row.get("carrier_name") or "").props("outlined dense").classes("w-full")
         iccid_hash = ui.input("ICCID Hash", value=row.get("iccid_hash") or "").props("outlined dense").classes("w-full")
-        esim_profile_name = ui.input("eSIM 名称", value=row.get("esim_profile_name") or "").props("outlined dense").classes("w-full")
+        esim_profile_name = ui.input("客服备注", value=row.get("esim_profile_name") or "").props("outlined dense").classes("w-full")
         esim_group_id = ui.input("eSIM 分组", value=row.get("esim_group_id") or "").props("outlined dense").classes("w-full")
         enabled = ui.switch("启用", value=bool(row.get("enabled", True)))
         status = ui.select(["active", "inactive", "disabled"], label="状态", value=row.get("status", "active")).props("outlined dense").classes("w-full")
