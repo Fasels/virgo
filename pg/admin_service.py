@@ -207,6 +207,8 @@ class PgAdminService:
             return self._list_contacts(safe_limit)
         if table_name == "devices":
             return self._list_devices(safe_limit)
+        if table_name == "sim_cards":
+            return self._list_sim_cards(safe_limit)
         columns = ", ".join(table.columns)
         statement = (
             f"SELECT {columns} FROM {table.name} "
@@ -222,7 +224,8 @@ class PgAdminService:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    SELECT id, phone_number, device_id, sim_number
+                    SELECT id, phone_number, device_id, sim_number,
+                           enabled, status, unregistered_at
                     FROM sim_cards
                     ORDER BY phone_number ASC NULLS LAST, device_id ASC, sim_number ASC
                     """
@@ -523,6 +526,19 @@ class PgAdminService:
         columns = ", ".join(table.columns)
         statement = (
             f"SELECT {columns} FROM devices "
+            f"WHERE unregistered_at IS NULL "
+            f"ORDER BY {table.order_by} LIMIT %s"
+        )
+        with self._database.transaction() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(statement, (limit,))
+                return [dict(row) for row in cursor.fetchall()]
+
+    def _list_sim_cards(self, limit: int) -> list[dict[str, Any]]:
+        table = TABLES["sim_cards"]
+        columns = ", ".join(table.columns)
+        statement = (
+            f"SELECT {columns} FROM sim_cards "
             f"WHERE unregistered_at IS NULL "
             f"ORDER BY {table.order_by} LIMIT %s"
         )

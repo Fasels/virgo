@@ -293,6 +293,16 @@ def test_list_device_rows_excludes_unregistered_devices():
     assert "unregistered_at IS NULL" in database.statements[0]
 
 
+def test_list_sim_card_rows_excludes_unregistered_sim_cards():
+    database = RecordingDatabase()
+    service = PgAdminService(database)
+
+    service.list_rows("sim_cards")
+
+    assert "FROM sim_cards" in database.statements[0]
+    assert "unregistered_at IS NULL" in database.statements[0]
+
+
 def test_list_account_options_returns_product_update_by_choices():
     database = RecordingDatabase(
         rows=[
@@ -470,6 +480,9 @@ def test_list_sim_card_options_returns_phone_labels_source_data():
                 "phone_number": "+8613800000000",
                 "device_id": "dev_1",
                 "sim_number": 1,
+                "enabled": True,
+                "status": "active",
+                "unregistered_at": None,
             }
         ]
     )
@@ -483,10 +496,14 @@ def test_list_sim_card_options_returns_phone_labels_source_data():
             "phone_number": "+8613800000000",
             "device_id": "dev_1",
             "sim_number": 1,
+            "enabled": True,
+            "status": "active",
+            "unregistered_at": None,
         }
     ]
     assert database.statements[0] == (
-        "SELECT id, phone_number, device_id, sim_number FROM sim_cards "
+        "SELECT id, phone_number, device_id, sim_number, enabled, status, unregistered_at "
+        "FROM sim_cards "
         "ORDER BY phone_number ASC NULLS LAST, device_id ASC, sim_number ASC"
     )
 

@@ -6,6 +6,7 @@ from pg.admin_ui import (
     FIELD_LABELS,
     TABLE_LABELS,
     _parse_sim_card_ids,
+    _format_account_sim_display,
     _format_table_rows_for_display,
     _sim_card_option_labels,
     _patch_nicegui_process_pool_setup,
@@ -87,12 +88,18 @@ def test_sim_card_option_labels_prefer_phone_number():
             "phone_number": "+8613800000000",
             "device_id": "dev_1",
             "sim_number": 1,
+            "enabled": True,
+            "status": "active",
+            "unregistered_at": None,
         },
         {
             "id": "sim_2",
             "phone_number": None,
             "device_id": "dev_2",
             "sim_number": 2,
+            "enabled": True,
+            "status": "active",
+            "unregistered_at": None,
         },
     ]
 
@@ -102,6 +109,54 @@ def test_sim_card_option_labels_prefer_phone_number():
         "sim_1": "+8613800000000",
         "sim_2": "sim_2 / dev_2 / SIM 2",
     }
+
+
+def test_sim_card_option_labels_mark_deleted_sim_cards_red():
+    options = [
+        {
+            "id": "sim_1",
+            "phone_number": "+8613800000000",
+            "device_id": "dev_1",
+            "sim_number": 1,
+            "enabled": False,
+            "status": "disabled",
+            "unregistered_at": 123456,
+        },
+        {
+            "id": "sim_2",
+            "phone_number": "<unsafe>",
+            "device_id": "dev_2",
+            "sim_number": 2,
+            "enabled": True,
+            "status": "active",
+            "unregistered_at": None,
+        },
+    ]
+
+    labels = _sim_card_option_labels(options)
+
+    assert labels["sim_1"] == (
+        '<span class="text-red-600 font-medium">'
+        "+8613800000000 (deleted)"
+        "</span>"
+    )
+    assert labels["sim_2"] == "&lt;unsafe&gt;"
+
+
+def test_account_sim_display_uses_labels_and_keeps_raw_ids_for_editing():
+    row = {"id": "acc_1", "use_sims_id": "sim_1,sim_2"}
+    labels = {
+        "sim_1": "+8613800000000",
+        "sim_2": '<span class="text-red-600 font-medium">sim_2 (deleted)</span>',
+    }
+
+    formatted = _format_account_sim_display(row, labels)
+
+    assert formatted["_use_sims_id_raw"] == "sim_1,sim_2"
+    assert formatted["use_sims_id"] == (
+        '+8613800000000, '
+        '<span class="text-red-600 font-medium">sim_2 (deleted)</span>'
+    )
 
 
 def test_parse_sim_card_ids_accepts_comma_string_and_sequence():

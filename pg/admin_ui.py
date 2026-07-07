@@ -1,4 +1,5 @@
 from datetime import datetime, tzinfo
+from html import escape
 import os
 from typing import Any
 
@@ -149,7 +150,15 @@ def _build_admin_page(ui: Any, service: PgAdminService) -> None:
 
 
 def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> None:
-    rows = _format_table_rows_for_display(service.list_rows(table_name))
+    sim_card_labels = (
+        _sim_card_option_labels(service.list_sim_card_options())
+        if table_name == "accounts"
+        else None
+    )
+    rows = _format_table_rows_for_display(
+        service.list_rows(table_name),
+        sim_card_labels=sim_card_labels,
+    )
     table = ui.table(
         columns=_table_columns(table_name),
         rows=rows,
@@ -157,9 +166,26 @@ def _build_table_panel(ui: Any, service: PgAdminService, table_name: str) -> Non
         selection="single",
         pagination=20,
     ).classes("w-full")
+    if table_name == "accounts":
+        table.add_slot(
+            "body-cell-use_sims_id",
+            """
+            <q-td :props="props">
+                <span v-html="props.value"></span>
+            </q-td>
+            """,
+        )
 
     def refresh() -> None:
-        table.rows = _format_table_rows_for_display(service.list_rows(table_name))
+        refreshed_sim_card_labels = (
+            _sim_card_option_labels(service.list_sim_card_options())
+            if table_name == "accounts"
+            else None
+        )
+        table.rows = _format_table_rows_for_display(
+            service.list_rows(table_name),
+            sim_card_labels=refreshed_sim_card_labels,
+        )
         table.selected.clear()
         table.update()
 
@@ -301,17 +327,24 @@ def _table_columns(table_name: str) -> list[dict[str, str]]:
 def _format_table_rows_for_display(
     rows: list[dict[str, Any]],
     timezone: tzinfo | None = None,
+    sim_card_labels: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    return [_format_table_row_for_display(row, timezone) for row in rows]
+    return [
+        _format_table_row_for_display(row, timezone, sim_card_labels)
+        for row in rows
+    ]
 
 
 def _format_table_row_for_display(
     row: dict[str, Any],
     timezone: tzinfo | None = None,
+    sim_card_labels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     formatted = dict(row)
     for field in TIME_FIELDS & formatted.keys():
         formatted[field] = _format_unix_milliseconds(formatted[field], timezone)
+    if sim_card_labels is not None and "use_sims_id" in formatted:
+        formatted = _format_account_sim_display(formatted, sim_card_labels)
     return formatted
 
 
@@ -328,13 +361,30 @@ def _sim_card_option_labels(options: list[dict[str, Any]]) -> dict[str, str]:
         sim_id = str(option["id"])
         phone_number = option.get("phone_number")
         if isinstance(phone_number, str) and phone_number.strip():
-            labels[sim_id] = phone_number.strip()
+            label = escape(phone_number.strip())
+            labels[sim_id] = _mark_deleted_sim_label(label, option)
             continue
-        labels[sim_id] = (
+        label = escape(
             f"{sim_id} / {option.get('device_id') or '-'} / "
             f"SIM {option.get('sim_number') or '-'}"
         )
+        labels[sim_id] = _mark_deleted_sim_label(label, option)
     return labels
+
+
+def _mark_deleted_sim_label(label: str, option: dict[str, Any]) -> str:
+    if not _is_deleted_sim_card(option):
+        return label
+    return f'<span class="text-red-600 font-medium">{label} (deleted)</span>'
+
+
+def _is_deleted_sim_card(option: dict[str, Any]) -> bool:
+    status = str(option.get("status") or "").lower()
+    return (
+        option.get("unregistered_at") is not None
+        or option.get("enabled") is False
+        or status == "disabled"
+    )
 
 
 def _account_option_labels(options: list[dict[str, Any]]) -> dict[str, str]:
@@ -372,6 +422,21 @@ def _parse_sim_card_ids(value: Any) -> list[str]:
     else:
         values = value
     return [str(item).strip() for item in values if str(item).strip()]
+
+
+def _format_account_sim_display(
+    row: dict[str, Any],
+    sim_card_labels: dict[str, str],
+) -> dict[str, Any]:
+    formatted = dict(row)
+    raw_value = formatted.get("_use_sims_id_raw", formatted.get("use_sims_id"))
+    formatted["_use_sims_id_raw"] = raw_value
+    sim_ids = _parse_sim_card_ids(raw_value)
+    formatted["use_sims_id"] = ", ".join(
+        sim_card_labels.get(sim_id, escape(sim_id))
+        for sim_id in sim_ids
+    )
+    return formatted
 
 
 def _with_selected(ui: Any, table: Any, action: Any) -> None:
@@ -553,9 +618,13 @@ def _open_account_dialog(
         use_sims_id = ui.select(
             _sim_card_option_labels(service.list_sim_card_options()),
             label="使用 SIM",
-            value=_parse_sim_card_ids((row or {}).get("use_sims_id")),
+            value=_parse_sim_card_ids(
+                (row or {}).get("_use_sims_id_raw", (row or {}).get("use_sims_id"))
+            ),
             multiple=True,
-        ).props("outlined dense use-chips").classes("w-full")
+        ).props(
+            "outlined dense use-chips options-html display-value-html"
+        ).classes("w-full")
         status = ui.select(
             ["ACTIVE", "DISABLED"],
             label="状态",
