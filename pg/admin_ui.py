@@ -355,25 +355,32 @@ def _format_unix_milliseconds(value: Any, timezone: tzinfo | None = None) -> Any
     return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _sim_card_option_labels(options: list[dict[str, Any]]) -> dict[str, str]:
+def _sim_card_option_labels(
+    options: list[dict[str, Any]],
+    include_deleted_ids: set[str] | None = None,
+) -> dict[str, str]:
+    included_deleted = include_deleted_ids or set()
     labels: dict[str, str] = {}
     for option in options:
         sim_id = str(option["id"])
+        deleted = _is_deleted_sim_card(option)
+        if deleted and sim_id not in included_deleted:
+            continue
         phone_number = option.get("phone_number")
         if isinstance(phone_number, str) and phone_number.strip():
             label = escape(phone_number.strip())
-            labels[sim_id] = _mark_deleted_sim_label(label, option)
+            labels[sim_id] = _mark_deleted_sim_label(label, deleted)
             continue
         label = escape(
             f"{sim_id} / {option.get('device_id') or '-'} / "
             f"SIM {option.get('sim_number') or '-'}"
         )
-        labels[sim_id] = _mark_deleted_sim_label(label, option)
+        labels[sim_id] = _mark_deleted_sim_label(label, deleted)
     return labels
 
 
-def _mark_deleted_sim_label(label: str, option: dict[str, Any]) -> str:
-    if not _is_deleted_sim_card(option):
+def _mark_deleted_sim_label(label: str, deleted: bool) -> str:
+    if not deleted:
         return label
     return f'<span class="text-red-600 font-medium">{label} (deleted)</span>'
 
@@ -433,8 +440,9 @@ def _format_account_sim_display(
     formatted["_use_sims_id_raw"] = raw_value
     sim_ids = _parse_sim_card_ids(raw_value)
     formatted["use_sims_id"] = ", ".join(
-        sim_card_labels.get(sim_id, escape(sim_id))
+        sim_card_labels[sim_id]
         for sim_id in sim_ids
+        if sim_id in sim_card_labels
     )
     return formatted
 
@@ -615,12 +623,16 @@ def _open_account_dialog(
             value=(row or {}).get("areas") or None,
             clearable=True,
         ).props("outlined dense").classes("w-full")
+        selected_sim_ids = _parse_sim_card_ids(
+            (row or {}).get("_use_sims_id_raw", (row or {}).get("use_sims_id"))
+        )
         use_sims_id = ui.select(
-            _sim_card_option_labels(service.list_sim_card_options()),
-            label="使用 SIM",
-            value=_parse_sim_card_ids(
-                (row or {}).get("_use_sims_id_raw", (row or {}).get("use_sims_id"))
+            _sim_card_option_labels(
+                service.list_sim_card_options(),
+                include_deleted_ids=set(selected_sim_ids),
             ),
+            label="使用 SIM",
+            value=selected_sim_ids,
             multiple=True,
         ).props(
             "outlined dense use-chips options-html display-value-html"

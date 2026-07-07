@@ -111,7 +111,7 @@ def test_sim_card_option_labels_prefer_phone_number():
     }
 
 
-def test_sim_card_option_labels_mark_deleted_sim_cards_red():
+def test_sim_card_option_labels_hide_deleted_sim_cards_by_default():
     options = [
         {
             "id": "sim_1",
@@ -135,28 +135,42 @@ def test_sim_card_option_labels_mark_deleted_sim_cards_red():
 
     labels = _sim_card_option_labels(options)
 
+    assert "sim_1" not in labels
+    assert labels["sim_2"] == "&lt;unsafe&gt;"
+
+
+def test_sim_card_option_labels_mark_current_deleted_sim_cards_red():
+    options = [
+        {
+            "id": "sim_1",
+            "phone_number": "+8613800000000",
+            "device_id": "dev_1",
+            "sim_number": 1,
+            "enabled": False,
+            "status": "disabled",
+            "unregistered_at": 123456,
+        }
+    ]
+
+    labels = _sim_card_option_labels(options, include_deleted_ids={"sim_1"})
+
     assert labels["sim_1"] == (
         '<span class="text-red-600 font-medium">'
         "+8613800000000 (deleted)"
         "</span>"
     )
-    assert labels["sim_2"] == "&lt;unsafe&gt;"
 
 
-def test_account_sim_display_uses_labels_and_keeps_raw_ids_for_editing():
+def test_account_sim_display_hides_deleted_sims_and_keeps_raw_ids_for_editing():
     row = {"id": "acc_1", "use_sims_id": "sim_1,sim_2"}
     labels = {
         "sim_1": "+8613800000000",
-        "sim_2": '<span class="text-red-600 font-medium">sim_2 (deleted)</span>',
     }
 
     formatted = _format_account_sim_display(row, labels)
 
     assert formatted["_use_sims_id_raw"] == "sim_1,sim_2"
-    assert formatted["use_sims_id"] == (
-        '+8613800000000, '
-        '<span class="text-red-600 font-medium">sim_2 (deleted)</span>'
-    )
+    assert formatted["use_sims_id"] == "+8613800000000"
 
 
 def test_parse_sim_card_ids_accepts_comma_string_and_sequence():
