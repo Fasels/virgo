@@ -1,9 +1,9 @@
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
-from queue import Empty, Queue
 from threading import Event, Lock
-from typing import Iterator
+from typing import AsyncIterator
 
 
 _CLOSE = object()
@@ -35,13 +35,27 @@ def encode_heartbeat() -> str:
 @dataclass(slots=True)
 class SseConnection:
     device_id: str
-    events: Queue[object] = field(default_factory=Queue)
+    events: asyncio.Queue[object] = field(default_factory=asyncio.Queue)
     closed: Event = field(default_factory=Event)
+    loop: asyncio.AbstractEventLoop | None = field(default=None, init=False)
+    loop_lock: Lock = field(default_factory=Lock, init=False)
+
+    def bind_loop(self) -> None:
+        with self.loop_lock:
+            self.loop = asyncio.get_running_loop()
+
+    def put_event(self, item: object) -> None:
+        with self.loop_lock:
+            loop = self.loop
+        if loop is None or loop.is_closed():
+            self.events.put_nowait(item)
+            return
+        loop.call_soon_threadsafe(self.events.put_nowait, item)
 
     def close(self) -> None:
         if not self.closed.is_set():
             self.closed.set()
-            self.events.put(_CLOSE)
+            self.put_event(_CLOSE)
 
 
 class SseConnectionRegistry:
@@ -72,15 +86,19 @@ class SseConnectionRegistry:
             connection = self._connections.get(device_id)
             if connection is None or connection.closed.is_set():
                 return False
-            connection.events.put(encode_message_enqueued(message_id))
+            connection.put_event(encode_message_enqueued(message_id))
             return True
 
-    def stream(self, connection: SseConnection) -> Iterator[str]:
+    async def stream(self, connection: SseConnection) -> AsyncIterator[str]:
+        connection.bind_loop()
         try:
             while not connection.closed.is_set():
                 try:
-                    item = connection.events.get(timeout=self._heartbeat_seconds)
-                except Empty:
+                    item = await asyncio.wait_for(
+                        connection.events.get(),
+                        timeout=self._heartbeat_seconds,
+                    )
+                except asyncio.TimeoutError:
                     yield encode_heartbeat()
                     continue
                 if item is _CLOSE:

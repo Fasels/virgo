@@ -1,7 +1,21 @@
+import asyncio
 import json
+from threading import Thread
 
 from app.services.sse import SseConnectionRegistry, encode_message_enqueued
 from app.services.message_publisher import RegistryMessageEnqueuedPublisher
+
+
+async def read_one_event(registry, connection):
+    stream = registry.stream(connection)
+    try:
+        return await anext(stream)
+    finally:
+        await stream.aclose()
+
+
+async def collect_events(registry, connection):
+    return [event async for event in registry.stream(connection)]
 
 
 def test_message_event_uses_android_contract():
@@ -27,12 +41,8 @@ def test_publish_targets_only_the_registered_device():
     second = registry.register("dev_2")
 
     assert registry.publish_message("dev_1", "msg_1") is True
-    first_stream = registry.stream(first)
-    second_stream = registry.stream(second)
-    assert next(first_stream).startswith("id: msg_1\n")
-    assert next(second_stream).startswith(": ping ")
-    first_stream.close()
-    second_stream.close()
+    assert asyncio.run(read_one_event(registry, first)).startswith("id: msg_1\n")
+    assert asyncio.run(read_one_event(registry, second)).startswith(": ping ")
 
 
 def test_publish_without_connection_is_a_successful_no_op():
@@ -48,9 +58,8 @@ def test_registry_message_publisher_delivers_to_registry():
 
     publisher.publish("dev_1", "msg_1")
 
-    stream = registry.stream(connection)
-    assert next(stream).startswith("id: msg_1\n")
-    stream.close()
+    event = asyncio.run(read_one_event(registry, connection))
+    assert event.startswith("id: msg_1\n")
 
 
 def test_new_connection_replaces_old_and_old_cleanup_preserves_new():
@@ -58,32 +67,54 @@ def test_new_connection_replaces_old_and_old_cleanup_preserves_new():
     old = registry.register("dev_1")
     new = registry.register("dev_1")
 
-    assert list(registry.stream(old)) == []
+    assert asyncio.run(collect_events(registry, old)) == []
     registry.unregister(old)
     assert registry.publish_message("dev_1", "msg_1") is True
-    new_stream = registry.stream(new)
-    assert next(new_stream).startswith("id: msg_1\n")
-    new_stream.close()
+    event = asyncio.run(read_one_event(registry, new))
+    assert event.startswith("id: msg_1\n")
 
 
 def test_idle_connection_emits_sse_comment_heartbeat():
     registry = SseConnectionRegistry(heartbeat_seconds=0.001)
     connection = registry.register("dev_1")
-    stream = registry.stream(connection)
 
-    heartbeat = next(stream)
+    heartbeat = asyncio.run(read_one_event(registry, connection))
 
     assert heartbeat.startswith(": ping ")
     assert heartbeat.endswith("Z\n\n")
-    stream.close()
 
 
 def test_closing_stream_unregisters_connection():
     registry = SseConnectionRegistry(heartbeat_seconds=0.001)
     connection = registry.register("dev_1")
-    stream = registry.stream(connection)
-    next(stream)
-
-    stream.close()
+    asyncio.run(read_one_event(registry, connection))
 
     assert registry.publish_message("dev_1", "msg_1") is False
+
+
+def test_publish_wakes_async_stream_from_sync_thread():
+    async def scenario():
+        registry = SseConnectionRegistry(heartbeat_seconds=10)
+        connection = registry.register("dev_1")
+
+        async def read_event():
+            stream = registry.stream(connection)
+            try:
+                return await anext(stream)
+            finally:
+                await stream.aclose()
+
+        event_task = asyncio.create_task(read_event())
+        await asyncio.sleep(0)
+
+        publisher_thread = Thread(
+            target=registry.publish_message,
+            args=("dev_1", "msg_1"),
+        )
+        publisher_thread.start()
+        publisher_thread.join()
+
+        event = await asyncio.wait_for(event_task, timeout=1)
+        assert event.startswith("id: msg_1\n")
+
+    asyncio.run(scenario())

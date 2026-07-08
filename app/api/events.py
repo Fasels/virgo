@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import AsyncIterator, Protocol
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
@@ -19,7 +19,7 @@ class EventsAuthenticationService(Protocol):
 class EventsRegistry(Protocol):
     def register(self, device_id: str) -> SseConnection: ...
 
-    def stream(self, connection: SseConnection): ...
+    def stream(self, connection: SseConnection) -> AsyncIterator[str]: ...
 
 
 def create_events_router(

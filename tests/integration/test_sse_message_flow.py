@@ -1,3 +1,4 @@
+import asyncio
 import json
 from uuid import uuid4
 
@@ -7,6 +8,14 @@ from fastapi.testclient import TestClient
 from app.application import create_app
 from app.config import Settings
 from app.services.sse import SseConnectionRegistry
+
+
+async def read_one_event(registry, connection):
+    stream = registry.stream(connection)
+    try:
+        return await anext(stream)
+    finally:
+        await stream.aclose()
 
 
 def test_committed_message_is_published_to_target_device_without_state_change(
@@ -57,9 +66,7 @@ def test_committed_message_is_published_to_target_device_without_state_change(
         )
 
     assert created.status_code == 201
-    stream = registry.stream(connection)
-    event = next(stream)
-    stream.close()
+    event = asyncio.run(read_one_event(registry, connection))
     assert "event: MessageEnqueued\n" in event
     assert f"id: {created.json()['id']}\n" in event
     data = event.split("data: ", 1)[1].splitlines()[0]

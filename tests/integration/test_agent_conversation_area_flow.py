@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -7,6 +8,14 @@ from fastapi.testclient import TestClient
 from app.application import create_app
 from app.config import Settings
 from app.services.agent_event_publisher import AgentEventRegistry
+
+
+async def read_one_event(registry, connection):
+    stream = registry.stream(connection)
+    try:
+        return await anext(stream)
+    finally:
+        await stream.aclose()
 
 
 def test_inbound_conversation_copies_area_from_receiving_sim(clean_database):
@@ -184,12 +193,8 @@ def test_inbound_message_publishes_only_to_accounts_bound_to_receiving_sim(clean
         )
 
     assert response.status_code == 201
-    bound_stream = registry.stream(bound)
-    unbound_stream = registry.stream(unbound)
-    bound_event = next(bound_stream)
-    unbound_event = next(unbound_stream)
-    bound_stream.close()
-    unbound_stream.close()
+    bound_event = asyncio.run(read_one_event(registry, bound))
+    unbound_event = asyncio.run(read_one_event(registry, unbound))
     assert "event: inbound_message\n" in bound_event
     assert f'"conversationId":"{response.json()["conversationId"]}"' in bound_event
     assert f'"messageId":"{response.json()["id"]}"' in bound_event

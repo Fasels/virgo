@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import AsyncIterator, Protocol
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
@@ -11,7 +11,7 @@ from app.services.agent_event_publisher import AgentEventConnection
 class AgentEventsRegistry(Protocol):
     def register(self, account_id: str) -> AgentEventConnection: ...
 
-    def stream(self, connection: AgentEventConnection): ...
+    def stream(self, connection: AgentEventConnection) -> AsyncIterator[str]: ...
 
 
 def create_agent_events_router(

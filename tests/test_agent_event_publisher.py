@@ -1,4 +1,6 @@
+import asyncio
 import json
+from threading import Thread
 
 from app.services.agent_event_publisher import (
     AgentEventRegistry,
@@ -6,6 +8,14 @@ from app.services.agent_event_publisher import (
     encode_agent_event,
     encode_heartbeat,
 )
+
+
+async def read_one_event(registry, connection):
+    stream = registry.stream(connection)
+    try:
+        return await anext(stream)
+    finally:
+        await stream.aclose()
 
 
 def test_agent_heartbeat_matches_android_keepalive_contract():
@@ -72,12 +82,43 @@ def test_registry_agent_event_publisher_delivers_full_inbound_payload():
         created_at=1800000000000,
     )
 
-    stream = registry.stream(connection)
-    event = next(stream)
-    stream.close()
+    event = asyncio.run(read_one_event(registry, connection))
     payload = json.loads(event.split("data: ", 1)[1].splitlines()[0])
     assert payload["messageId"] == "msg_1"
     assert payload["conversationId"] == "conv_1"
     assert payload["textContent"] == "Hello"
     assert payload["state"] == "Received"
     assert payload["createdAt"] == 1800000000000
+
+
+def test_agent_publish_wakes_async_stream_from_sync_thread():
+    async def scenario():
+        registry = AgentEventRegistry(heartbeat_seconds=10)
+        connection = registry.register("acct_1")
+
+        async def read_event():
+            stream = registry.stream(connection)
+            try:
+                return await anext(stream)
+            finally:
+                await stream.aclose()
+
+        event_task = asyncio.create_task(read_event())
+        await asyncio.sleep(0)
+
+        publisher_thread = Thread(
+            target=registry.publish,
+            args=("inbound_message",),
+            kwargs={
+                "account_id": "acct_1",
+                "conversation_id": "conv_1",
+                "message_id": "msg_1",
+            },
+        )
+        publisher_thread.start()
+        publisher_thread.join()
+
+        event = await asyncio.wait_for(event_task, timeout=1)
+        assert event.startswith("id: msg_1\n")
+
+    asyncio.run(scenario())

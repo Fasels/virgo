@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -14,6 +15,14 @@ from app.services.message_service import (
     NoAvailableDevice,
 )
 from app.services.sse import SseConnectionRegistry
+
+
+async def read_one_event(registry, connection):
+    stream = registry.stream(connection)
+    try:
+        return await anext(stream)
+    finally:
+        await stream.aclose()
 
 
 class RecordingMessageService:
@@ -174,6 +183,5 @@ def test_application_default_message_publisher_uses_injected_sse_registry(
     )
     constructed["publisher"].publish("dev_1", "msg_1")
 
-    stream = registry.stream(connection)
-    assert next(stream).startswith("id: msg_1\n")
-    stream.close()
+    event = asyncio.run(read_one_event(registry, connection))
+    assert event.startswith("id: msg_1\n")
