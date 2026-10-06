@@ -20,6 +20,7 @@ from app.api.message import MessageCreationService, create_message_router
 from app.api.message_pull import MessagePullingService, create_message_pull_router
 from app.api.message_status import MessageStateUpdatingService, create_message_status_router
 from app.api.inbox import InboundCreatingService, create_inbox_router
+from app.api.mms_inbox import create_mms_inbox_router
 from app.config import Settings
 from app.database import Database
 from app.errors import install_error_handling
@@ -102,6 +103,7 @@ def create_app(
         RegistryAgentEventPublisher(agent_registry),
     )
     mms_service = mms_webhook_service
+    mms_storage = None
     if mms_service is None:
         import boto3
 
@@ -127,6 +129,7 @@ def create_app(
     agent_conversations = agent_conversation_service or AgentConversationService(
         database,
         business_message_service,
+        attachment_storage=mms_storage,
     )
     agent_contacts = agent_contact_service or AgentContactService(database)
     app.include_router(
@@ -146,6 +149,7 @@ def create_app(
     app.include_router(create_message_pull_router(auth_service, pull_service))
     app.include_router(create_message_status_router(auth_service, state_service))
     app.include_router(create_inbox_router(auth_service, inbound_service))
+    app.include_router(create_mms_inbox_router(auth_service, mms_service))
     app.include_router(
         create_mms_webhook_router(
             mms_service,

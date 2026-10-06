@@ -47,6 +47,12 @@ class S3ObjectStorage:
         self._bucket = bucket
         self._public_base_url = public_base_url.rstrip("/")
 
+    def download_url(self, *, bucket: str, key: str) -> str:
+        # Generate on each authorized message query, never persist expiring URLs.
+        return self._client.generate_presigned_url(
+            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=900,
+        )
+
     def upload_bytes(self, *, key: str, body: bytes, content_type: str) -> StoredObject:
         response = self._client.put_object(
             Bucket=self._bucket,
